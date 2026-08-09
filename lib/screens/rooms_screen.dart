@@ -2,9 +2,12 @@ import 'dart:math';
 
 import 'package:flutter/material.dart';
 
+import '../models/mission_post.dart';
 import '../models/mission_room.dart';
 import '../widgets/doit_logo.dart';
+import '../widgets/story_card_stack.dart';
 import 'global_missions_screen.dart';
+import 'mission_feed_screen.dart';
 import 'room_detail_screen.dart';
 
 class RoomsScreen extends StatefulWidget {
@@ -51,9 +54,73 @@ class _RoomsScreenState extends State<RoomsScreen> {
       memberCount: 2,
     ),
   ];
+  final Map<String, List<MissionPost>> _postsByRoom = {
+    'FRI824': [
+      const MissionPost(
+        author: '민수',
+        mission: '각자 3,000원 이하 간식 하나 골라오기',
+        emoji: '🍪',
+        startColor: Color(0xFFF0A56B),
+        endColor: Color(0xFF7E4935),
+        sadCount: 3,
+        heartCount: 11,
+      ),
+      const MissionPost(
+        author: '서연',
+        mission: '오늘의 단체 사진 한 장 찍기',
+        emoji: '📸',
+        startColor: Color(0xFF8684B9),
+        endColor: Color(0xFF272644),
+        sadCount: 2,
+        heartCount: 14,
+      ),
+    ],
+    'CAMPUS': [
+      const MissionPost(
+        author: '지윤',
+        mission: '빨간색 물건 5개 찾아서 인증하기',
+        emoji: '🔴',
+        startColor: Color(0xFFE78A94),
+        endColor: Color(0xFF6D2A3A),
+        sadCount: 1,
+        heartCount: 8,
+      ),
+      const MissionPost(
+        author: '현우',
+        mission: '친구의 미션 사진에 반응 남기기',
+        emoji: '🙌',
+        startColor: Color(0xFF73B8A8),
+        endColor: Color(0xFF285B57),
+        sadCount: 4,
+        heartCount: 10,
+      ),
+    ],
+    'WALK77': [
+      const MissionPost(
+        author: '유진',
+        mission: '평소 가지 않던 길로 함께 산책하기',
+        emoji: '🌿',
+        startColor: Color(0xFFA7C985),
+        endColor: Color(0xFF3F6648),
+        sadCount: 0,
+        heartCount: 6,
+      ),
+    ],
+  };
 
   List<MissionRoom> get _joinedRooms =>
       _rooms.where((room) => room.isJoined).toList();
+
+  List<({MissionRoom room, MissionPost post, int index})> get _homeStories {
+    final stories = <({MissionRoom room, MissionPost post, int index})>[];
+    for (final room in _joinedRooms) {
+      final posts = _postsByRoom[room.code] ?? const <MissionPost>[];
+      for (var index = 0; index < posts.length; index++) {
+        stories.add((room: room, post: posts[index], index: index));
+      }
+    }
+    return stories;
+  }
 
   String _createUniqueCode() {
     String code;
@@ -84,7 +151,10 @@ class _RoomsScreenState extends State<RoomsScreen> {
       isJoined: true,
     );
 
-    setState(() => _rooms.insert(0, room));
+    setState(() {
+      _rooms.insert(0, room);
+      _postsByRoom[room.code] = [];
+    });
     _showMessage('${room.name} 방을 만들었어요. 코드: ${room.code}');
   }
 
@@ -130,9 +200,28 @@ class _RoomsScreenState extends State<RoomsScreen> {
   }
 
   void _openRoom(MissionRoom room) {
+    final posts = _postsByRoom.putIfAbsent(room.code, () => []);
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) => RoomDetailScreen(room: room),
+        builder: (context) => RoomDetailScreen(
+          room: room,
+          posts: posts,
+          onPostsChanged: () {
+            if (mounted) setState(() {});
+          },
+        ),
+      ),
+    );
+  }
+
+  void _openHomeStory(MissionRoom room, List<MissionPost> posts, int index) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (context) => MissionFeedScreen(
+          roomName: room.name,
+          posts: posts,
+          initialIndex: index,
+        ),
       ),
     );
   }
@@ -224,49 +313,25 @@ class _RoomsScreenState extends State<RoomsScreen> {
                   ),
                 ),
                 const SizedBox(height: 34),
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(24),
-                    border: Border.all(
-                      color: Colors.black.withValues(alpha: 0.05),
-                    ),
+                Text(
+                  'Friends Stories',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w900,
                   ),
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 48,
-                        height: 48,
-                        alignment: Alignment.center,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFFFE8CD),
-                          borderRadius: BorderRadius.circular(16),
-                        ),
-                        child: const Text('📸', style: TextStyle(fontSize: 24)),
-                      ),
-                      const SizedBox(width: 14),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '오늘의 순간을 남겨보세요',
-                              style: TextStyle(fontWeight: FontWeight.w900),
-                            ),
-                            SizedBox(height: 5),
-                            Text(
-                              '방에 들어가 친구들의 새 사진을 확인할 수 있어요.',
-                              style: TextStyle(
-                                color: Colors.black54,
-                                height: 1.4,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
+                ),
+                const SizedBox(height: 14),
+                StoryCardStack(
+                  key: const Key('homeStories'),
+                  posts: [for (final story in _homeStories) story.post],
+                  height: 226,
+                  onStoryTap: (index) {
+                    final story = _homeStories[index];
+                    _openHomeStory(
+                      story.room,
+                      _postsByRoom[story.room.code]!,
+                      story.index,
+                    );
+                  },
                 ),
               ],
             ),

@@ -9,6 +9,7 @@ class MissionPost {
     required this.endColor,
     required this.sadCount,
     required this.heartCount,
+    this.imagePath,
   });
 
   final String author;
@@ -18,4 +19,5 @@ class MissionPost {
   final Color endColor;
   final int sadCount;
   final int heartCount;
+  final String? imagePath;
 }

@@ -1,68 +1,98 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../models/mission_post.dart';
 import '../models/mission_room.dart';
-import '../widgets/mission_photo.dart';
+import '../widgets/story_card_stack.dart';
 import 'mission_feed_screen.dart';
 
-class RoomDetailScreen extends StatelessWidget {
-  const RoomDetailScreen({required this.room, super.key});
+class RoomDetailScreen extends StatefulWidget {
+  const RoomDetailScreen({
+    required this.room,
+    required this.posts,
+    required this.onPostsChanged,
+    super.key,
+  });
 
   final MissionRoom room;
+  final List<MissionPost> posts;
+  final VoidCallback onPostsChanged;
 
-  List<MissionPost> get _posts => const [
-    MissionPost(
-      author: '민수',
-      mission: '예쁜 장소에서 음료 마시기',
-      emoji: '🥤',
-      startColor: Color(0xFF8DC4E8),
-      endColor: Color(0xFF31526E),
-      sadCount: 4,
-      heartCount: 12,
-    ),
-    MissionPost(
-      author: '지윤',
-      mission: '신발샷 모으기',
-      emoji: '👟',
-      startColor: Color(0xFFC5889E),
-      endColor: Color(0xFF4C3047),
-      sadCount: 2,
-      heartCount: 9,
-    ),
-    MissionPost(
-      author: '현우',
-      mission: '노란색 물건 찾아오기',
-      emoji: '🌼',
-      startColor: Color(0xFFF7C95D),
-      endColor: Color(0xFF9B6C25),
-      sadCount: 1,
-      heartCount: 7,
-    ),
-    MissionPost(
-      author: '서연',
-      mission: '영화 포스터처럼 찍기',
-      emoji: '🎬',
-      startColor: Color(0xFF8684B9),
-      endColor: Color(0xFF272644),
-      sadCount: 3,
-      heartCount: 15,
-    ),
+  @override
+  State<RoomDetailScreen> createState() => _RoomDetailScreenState();
+}
+
+class _RoomDetailScreenState extends State<RoomDetailScreen> {
+  final ImagePicker _imagePicker = ImagePicker();
+
+  List<String> get _missionItems => [
+    widget.room.mission,
+    '친구의 미션 사진에 반응 남기기',
+    '오늘의 단체 사진 한 장 찍기',
   ];
 
-  void _copyCode(BuildContext context) {
-    Clipboard.setData(ClipboardData(text: room.code));
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(const SnackBar(content: Text('방 코드를 복사했어요.')));
+  Future<void> _takeMissionPhoto(String mission) async {
+    try {
+      final photo = await _imagePicker.pickImage(
+        source: ImageSource.camera,
+        imageQuality: 85,
+        maxWidth: 1920,
+      );
+      if (photo == null || !mounted) return;
+
+      setState(() {
+        widget.posts.insert(
+          0,
+          MissionPost(
+            author: '나',
+            mission: mission,
+            emoji: '📸',
+            startColor: const Color(0xFF8E86D8),
+            endColor: const Color(0xFF433A7A),
+            sadCount: 0,
+            heartCount: 0,
+            imagePath: photo.path,
+          ),
+        );
+      });
+      widget.onPostsChanged();
+      _showMessage('촬영한 사진을 이 미션에 올렸어요.');
+    } catch (_) {
+      if (mounted) _showMessage('카메라를 열지 못했어요. 권한을 확인해주세요.');
+    }
   }
 
-  void _openPost(BuildContext context, int index) {
+  void _copyText(String label, String value) {
+    Clipboard.setData(ClipboardData(text: value));
+    _showMessage('$label을 복사했어요.');
+  }
+
+  void _showMessage(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showRoomSettings() {
+    showDialog<void>(
+      context: context,
+      builder: (context) => _RoomSettingsDialog(
+        room: widget.room,
+        onCopyCode: () => _copyText('방 코드', widget.room.code),
+        onCopyPassword: widget.room.password == null
+            ? null
+            : () => _copyText('비밀번호', widget.room.password!),
+      ),
+    );
+  }
+
+  void _openPost(int index) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (context) => MissionFeedScreen(
-          roomName: room.name,
-          posts: _posts,
+          roomName: widget.room.name,
+          posts: widget.posts,
           initialIndex: index,
         ),
       ),
@@ -72,24 +102,20 @@ class RoomDetailScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
-    final missionItems = [
-      room.mission,
-      '친구의 미션 사진에 반응 남기기',
-      '오늘의 단체 사진 한 장 찍기',
-    ];
 
     return Scaffold(
       appBar: AppBar(
         centerTitle: true,
         title: Text(
-          room.name,
+          widget.room.name,
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
         actions: [
           IconButton(
-            tooltip: '방 코드 복사',
-            onPressed: () => _copyCode(context),
-            icon: const Icon(Icons.ios_share_rounded),
+            key: const Key('roomSettingsButton'),
+            tooltip: '방 설정',
+            onPressed: _showRoomSettings,
+            icon: const Icon(Icons.settings_rounded),
           ),
         ],
       ),
@@ -100,32 +126,13 @@ class RoomDetailScreen extends StatelessWidget {
             child: CustomScrollView(
               slivers: [
                 SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
                   sliver: SliverToBoxAdapter(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        Center(
-                          child: ActionChip(
-                            avatar: Icon(
-                              room.isLocked
-                                  ? Icons.lock_rounded
-                                  : Icons.key_rounded,
-                              size: 17,
-                            ),
-                            label: Text(
-                              '${room.code} · ${room.memberCount}명',
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w800,
-                                letterSpacing: 0.5,
-                              ),
-                            ),
-                            onPressed: () => _copyCode(context),
-                          ),
-                        ),
-                        const SizedBox(height: 22),
                         Container(
-                          padding: const EdgeInsets.all(20),
+                          padding: const EdgeInsets.fromLTRB(20, 18, 14, 12),
                           decoration: BoxDecoration(
                             color: Colors.white,
                             borderRadius: BorderRadius.circular(24),
@@ -136,53 +143,23 @@ class RoomDetailScreen extends StatelessWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    '오늘의 미션',
-                                    style: Theme.of(context)
-                                        .textTheme
-                                        .titleMedium
-                                        ?.copyWith(fontWeight: FontWeight.w900),
-                                  ),
-                                  const Spacer(),
-                                  const Icon(
-                                    Icons.camera_alt_rounded,
-                                    color: Colors.black38,
-                                  ),
-                                ],
+                              Text(
+                                '오늘의 미션',
+                                style: Theme.of(context).textTheme.titleMedium
+                                    ?.copyWith(fontWeight: FontWeight.w900),
                               ),
-                              const SizedBox(height: 14),
-                              for (final mission in missionItems)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 9),
-                                  child: Row(
-                                    crossAxisAlignment:
-                                        CrossAxisAlignment.start,
-                                    children: [
-                                      Container(
-                                        width: 6,
-                                        height: 6,
-                                        margin: const EdgeInsets.only(
-                                          top: 7,
-                                          right: 10,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: colorScheme.primary,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
-                                      Expanded(
-                                        child: Text(
-                                          mission,
-                                          style: const TextStyle(
-                                            height: 1.45,
-                                            fontWeight: FontWeight.w600,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
+                              const SizedBox(height: 10),
+                              for (
+                                var index = 0;
+                                index < _missionItems.length;
+                                index++
+                              )
+                                _RoomMissionRow(
+                                  key: Key('roomMission$index'),
+                                  mission: _missionItems[index],
+                                  color: colorScheme.primary,
+                                  onCameraTap: () =>
+                                      _takeMissionPhoto(_missionItems[index]),
                                 ),
                             ],
                           ),
@@ -197,7 +174,7 @@ class RoomDetailScreen extends StatelessWidget {
                             ),
                             const Spacer(),
                             Text(
-                              '좌우로 넘겨보기',
+                              '${widget.posts.length}개',
                               style: TextStyle(
                                 color: colorScheme.primary,
                                 fontSize: 12,
@@ -211,42 +188,159 @@ class RoomDetailScreen extends StatelessWidget {
                     ),
                   ),
                 ),
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-                  sliver: SliverGrid.builder(
-                    itemCount: _posts.length,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 12,
-                          crossAxisSpacing: 12,
-                          childAspectRatio: 0.78,
+                if (widget.posts.isEmpty)
+                  const SliverPadding(
+                    padding: EdgeInsets.fromLTRB(20, 20, 20, 32),
+                    sliver: SliverToBoxAdapter(
+                      child: Center(
+                        child: Text(
+                          '아직 사진이 없어요.\n미션 옆 카메라로 첫 사진을 남겨보세요.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.black45, height: 1.5),
                         ),
-                    itemBuilder: (context, index) {
-                      return GestureDetector(
-                        key: Key('missionPost$index'),
-                        onTap: () => _openPost(context, index),
-                        child: Hero(
-                          tag: 'mission-post-$index',
-                          child: MissionPhoto(post: _posts[index]),
-                        ),
-                      );
-                    },
+                      ),
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
+                    sliver: SliverToBoxAdapter(
+                      child: StoryCardStack(
+                        posts: widget.posts,
+                        height: 290,
+                        onStoryTap: _openPost,
+                      ),
+                    ),
                   ),
-                ),
               ],
             ),
           ),
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('사진 인증 기능은 다음 단계에서 연결할게요.')),
-          );
-        },
-        icon: const Icon(Icons.add_a_photo_rounded),
-        label: const Text('인증하기'),
+    );
+  }
+}
+
+class _RoomMissionRow extends StatelessWidget {
+  const _RoomMissionRow({
+    required this.mission,
+    required this.color,
+    required this.onCameraTap,
+    super.key,
+  });
+
+  final String mission;
+  final Color color;
+  final VoidCallback onCameraTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        children: [
+          Container(
+            width: 6,
+            height: 6,
+            margin: const EdgeInsets.only(right: 10),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+          ),
+          Expanded(
+            child: Text(
+              mission,
+              style: const TextStyle(height: 1.4, fontWeight: FontWeight.w600),
+            ),
+          ),
+          IconButton.filledTonal(
+            tooltip: '이 미션 사진 촬영',
+            onPressed: onCameraTap,
+            icon: const Icon(Icons.camera_alt_rounded, size: 20),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _RoomSettingsDialog extends StatelessWidget {
+  const _RoomSettingsDialog({
+    required this.room,
+    required this.onCopyCode,
+    required this.onCopyPassword,
+  });
+
+  final MissionRoom room;
+  final VoidCallback onCopyCode;
+  final VoidCallback? onCopyPassword;
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Row(
+        children: [
+          Icon(Icons.settings_rounded),
+          SizedBox(width: 9),
+          Text('방 설정'),
+        ],
+      ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _SettingsInfoRow(label: '방 코드', value: room.code, onCopy: onCopyCode),
+          const Divider(height: 1),
+          _SettingsInfoRow(
+            label: '비밀번호',
+            value: room.password ?? '설정 안 함',
+            onCopy: onCopyPassword,
+          ),
+          const Divider(height: 1),
+          _SettingsInfoRow(label: '참여 인원', value: '${room.memberCount}명'),
+        ],
+      ),
+      actions: [
+        FilledButton.tonal(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('닫기'),
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingsInfoRow extends StatelessWidget {
+  const _SettingsInfoRow({
+    required this.label,
+    required this.value,
+    this.onCopy,
+  });
+
+  final String label;
+  final String value;
+  final VoidCallback? onCopy;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 72,
+            child: Text(label, style: const TextStyle(color: Colors.black54)),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w800),
+            ),
+          ),
+          if (onCopy != null)
+            IconButton(
+              tooltip: '$label 복사',
+              onPressed: onCopy,
+              icon: const Icon(Icons.copy_rounded, size: 20),
+            ),
+        ],
       ),
     );
   }
