@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config/supabase_config.dart';
 import 'screens/magazine_screen.dart';
 import 'screens/rooms_screen.dart';
+import 'theme/app_theme.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -23,17 +24,10 @@ class RandomMissionApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const seedColor = Color(0xFF6750E8);
-
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'DOIT',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: seedColor),
-        scaffoldBackgroundColor: const Color(0xFFF7F6FB),
-        fontFamilyFallback: const ['Noto Sans KR', 'Roboto'],
-        useMaterial3: true,
-      ),
+      theme: AppTheme.light,
       home: skipSplash ? const _AppShell() : const _SplashGate(),
     );
   }
@@ -86,16 +80,24 @@ class _AppShellState extends State<_AppShell> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        body: IndexedStack(index: _selectedIndex, children: _pages),
-        bottomNavigationBar: NavigationBar(
-          selectedIndex: _selectedIndex,
-          onDestinationSelected: (index) => setState(() => _selectedIndex = index),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups_rounded), label: '미션'),
-            NavigationDestination(icon: Icon(Icons.auto_stories_outlined), selectedIcon: Icon(Icons.auto_stories_rounded), label: '매거진'),
-          ],
+    body: IndexedStack(index: _selectedIndex, children: _pages),
+    bottomNavigationBar: NavigationBar(
+      selectedIndex: _selectedIndex,
+      onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+      destinations: const [
+        NavigationDestination(
+          icon: Icon(Icons.groups_outlined),
+          selectedIcon: Icon(Icons.groups_rounded),
+          label: '미션',
         ),
-      );
+        NavigationDestination(
+          icon: Icon(Icons.auto_stories_outlined),
+          selectedIcon: Icon(Icons.auto_stories_rounded),
+          label: '매거진',
+        ),
+      ],
+    ),
+  );
 }
 
 class _SplashScreen extends StatelessWidget {

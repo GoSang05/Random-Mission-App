@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/mission_post.dart';
 import '../models/mission_room.dart';
+import '../theme/app_theme.dart';
 import '../widgets/doit_logo.dart';
 import '../widgets/story_card_stack.dart';
 import 'global_missions_screen.dart';
@@ -236,108 +237,291 @@ class _RoomsScreenState extends State<RoomsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
     return Scaffold(
       key: const ValueKey('rooms'),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 600),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 22, 20, 32),
-              children: [
-                const Center(child: DoitLogo()),
-                const SizedBox(height: 30),
-                _GlobalMissionBanner(onTap: _openGlobalMissions),
-                const SizedBox(height: 30),
-                Row(
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.page,
+                18,
+                AppSpacing.page,
+                40,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _HomeHeader(),
+                  const SizedBox(height: 24),
+                  _GlobalMissionBanner(onTap: _openGlobalMissions),
+                  const SizedBox(height: AppSpacing.item),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _QuickActionCard(
+                          actionKey: const Key('joinRoomButton'),
+                          icon: Icons.key_rounded,
+                          title: '코드로 참여',
+                          subtitle: '초대 코드 입력',
+                          onTap: _showJoinRoomDialog,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.item),
+                      Expanded(
+                        child: _QuickActionCard(
+                          actionKey: const Key('createRoomButton'),
+                          icon: Icons.add_rounded,
+                          title: '새 방 만들기',
+                          subtitle: '친구들과 시작',
+                          emphasized: true,
+                          onTap: _showCreateRoomDialog,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.section),
+                  _SectionHeader(
+                    title: 'My Rooms',
+                    subtitle: '참여 중인 미션 방',
+                    count: _joinedRooms.length,
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 124,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: _joinedRooms.length + 1,
+                      separatorBuilder: (_, _) => const SizedBox(width: 12),
+                      itemBuilder: (context, index) {
+                        if (index == _joinedRooms.length) {
+                          return _CreateRoomTile(onTap: _showCreateRoomDialog);
+                        }
+                        final room = _joinedRooms[index];
+                        return _RoomTile(
+                          room: room,
+                          onTap: () => _openRoom(room),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.section),
+                  const _SectionHeader(
+                    title: 'Friends Stories',
+                    subtitle: '친구들이 남긴 오늘의 순간',
+                  ),
+                  const SizedBox(height: 18),
+                  StoryCardStack(
+                    key: const Key('homeStories'),
+                    posts: [for (final story in _homeStories) story.post],
+                    height: 244,
+                    onStoryTap: (index) {
+                      final story = _homeStories[index];
+                      _openHomeStory(
+                        story.room,
+                        _postsByRoom[story.room.code]!,
+                        story.index,
+                      );
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeHeader extends StatelessWidget {
+  const _HomeHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Row(
+      children: [
+        const DoitLogo(fontSize: 31),
+        const Spacer(),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Text('오늘도 한 번 해볼까요?', style: theme.textTheme.labelLarge),
+            Text(
+              '친구들과 새로운 미션을 시작해요',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(width: 12),
+        CircleAvatar(
+          radius: 22,
+          backgroundColor: colorScheme.primaryContainer,
+          foregroundColor: colorScheme.onPrimaryContainer,
+          child: const Icon(Icons.person_rounded),
+        ),
+      ],
+    );
+  }
+}
+
+class _QuickActionCard extends StatelessWidget {
+  const _QuickActionCard({
+    required this.actionKey,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+    this.emphasized = false,
+  });
+
+  final Key actionKey;
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+  final bool emphasized;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final background = emphasized ? colorScheme.primary : Colors.white;
+    final foreground = emphasized
+        ? colorScheme.onPrimary
+        : colorScheme.onSurface;
+
+    return Material(
+      color: background,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.medium),
+        side: BorderSide(
+          color: emphasized ? colorScheme.primary : colorScheme.outlineVariant,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        key: actionKey,
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: emphasized
+                      ? Colors.white.withValues(alpha: 0.16)
+                      : colorScheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(AppRadius.small),
+                ),
+                child: Icon(
+                  icon,
+                  color: emphasized
+                      ? colorScheme.onPrimary
+                      : colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
-                      'My Rooms',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: foreground,
                       ),
                     ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: foreground.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({
+    required this.title,
+    required this.subtitle,
+    this.count,
+  });
+
+  final String title;
+  final String subtitle;
+  final int? count;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Text(title, style: theme.textTheme.titleLarge),
+                  if (count != null) ...[
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
+                        horizontal: 9,
+                        vertical: 4,
                       ),
                       decoration: BoxDecoration(
                         color: colorScheme.primaryContainer,
                         borderRadius: BorderRadius.circular(99),
                       ),
                       child: Text(
-                        '${_joinedRooms.length}',
-                        style: TextStyle(
+                        '$count',
+                        style: theme.textTheme.labelSmall?.copyWith(
                           color: colorScheme.onPrimaryContainer,
-                          fontSize: 12,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
                     ),
-                    const Spacer(),
-                    IconButton(
-                      key: const Key('joinRoomButton'),
-                      tooltip: '코드로 참여',
-                      onPressed: _showJoinRoomDialog,
-                      icon: const Icon(Icons.key_rounded),
-                    ),
-                    IconButton.filled(
-                      key: const Key('createRoomButton'),
-                      tooltip: '새 방 만들기',
-                      onPressed: _showCreateRoomDialog,
-                      icon: const Icon(Icons.add_rounded),
-                    ),
                   ],
+                ],
+              ),
+              const SizedBox(height: 3),
+              Text(
+                subtitle,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: colorScheme.onSurfaceVariant,
                 ),
-                const SizedBox(height: 14),
-                SizedBox(
-                  height: 112,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _joinedRooms.length + 1,
-                    separatorBuilder: (_, _) => const SizedBox(width: 13),
-                    itemBuilder: (context, index) {
-                      if (index == _joinedRooms.length) {
-                        return _CreateRoomTile(onTap: _showCreateRoomDialog);
-                      }
-                      final room = _joinedRooms[index];
-                      return _RoomTile(
-                        room: room,
-                        onTap: () => _openRoom(room),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 34),
-                Text(
-                  'Friends Stories',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 14),
-                StoryCardStack(
-                  key: const Key('homeStories'),
-                  posts: [for (final story in _homeStories) story.post],
-                  height: 226,
-                  onStoryTap: (index) {
-                    final story = _homeStories[index];
-                    _openHomeStory(
-                      story.room,
-                      _postsByRoom[story.room.code]!,
-                      story.index,
-                    );
-                  },
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
-      ),
+      ],
     );
   }
 }
@@ -349,48 +533,110 @@ class _GlobalMissionBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
     final colorScheme = Theme.of(context).colorScheme;
 
     return Material(
-      color: colorScheme.primaryContainer,
-      borderRadius: BorderRadius.circular(24),
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(AppRadius.large),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         key: const Key('globalMissionButton'),
         onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
-          child: Row(
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                colorScheme.primary,
+                Color.lerp(colorScheme.primary, colorScheme.secondary, 0.72)!,
+              ],
+            ),
+          ),
+          child: Stack(
             children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
+              Positioned(
+                right: -22,
+                top: -28,
+                child: Container(
+                  width: 120,
+                  height: 120,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: Colors.white.withValues(alpha: 0.09),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(22),
+                child: Row(
                   children: [
-                    Text(
-                      'Global Missions',
-                      style: TextStyle(
-                        color: colorScheme.onPrimaryContainer,
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 5,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.16),
+                              borderRadius: BorderRadius.circular(99),
+                            ),
+                            child: Text(
+                              'WEEKLY CHALLENGE',
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: colorScheme.onPrimary,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 0.6,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 14),
+                          Text(
+                            'Global Missions',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              color: colorScheme.onPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 5),
+                          Text(
+                            '모두와 같은 미션에 도전하고\n새로운 이야기를 남겨보세요.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: colorScheme.onPrimary.withValues(
+                                alpha: 0.8,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      '모두와 같은 미션에 도전하기',
-                      style: TextStyle(
-                        color: colorScheme.onPrimaryContainer.withValues(
-                          alpha: 0.72,
+                    const SizedBox(width: 16),
+                    Container(
+                      width: 62,
+                      height: 62,
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.22),
                         ),
                       ),
+                      child: Icon(
+                        Icons.public_rounded,
+                        size: 30,
+                        color: colorScheme.onPrimary,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Icon(
+                      Icons.arrow_forward_rounded,
+                      color: colorScheme.onPrimary,
                     ),
                   ],
                 ),
-              ),
-              const Text('📷', style: TextStyle(fontSize: 30)),
-              const SizedBox(width: 7),
-              Icon(
-                Icons.arrow_forward_rounded,
-                color: colorScheme.onPrimaryContainer,
               ),
             ],
           ),
@@ -408,35 +654,56 @@ class _RoomTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+    final useSecondary = room.code.codeUnitAt(0).isEven;
+    final tileColor = useSecondary
+        ? colorScheme.secondaryContainer
+        : colorScheme.primaryContainer;
+    final tileForeground = useSecondary
+        ? colorScheme.onSecondaryContainer
+        : colorScheme.onPrimaryContainer;
+
     return SizedBox(
-      width: 82,
+      width: 92,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
           key: Key('roomTile_${room.code}'),
           onTap: onTap,
-          borderRadius: BorderRadius.circular(22),
+          borderRadius: BorderRadius.circular(AppRadius.medium),
           child: Column(
             children: [
               Container(
-                width: 72,
-                height: 72,
+                width: 82,
+                height: 82,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE3E1E8),
-                  borderRadius: BorderRadius.circular(22),
+                  color: tileColor,
+                  borderRadius: BorderRadius.circular(AppRadius.medium),
+                  border: Border.all(
+                    color: tileForeground.withValues(alpha: 0.08),
+                  ),
                 ),
                 child: Stack(
                   alignment: Alignment.center,
                   children: [
-                    Text(room.emoji, style: const TextStyle(fontSize: 30)),
+                    Text(room.emoji, style: const TextStyle(fontSize: 32)),
                     if (room.isLocked)
-                      const Positioned(
+                      Positioned(
                         top: 8,
                         right: 8,
-                        child: Icon(
-                          Icons.lock_rounded,
-                          size: 14,
-                          color: Colors.black45,
+                        child: Container(
+                          width: 23,
+                          height: 23,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.82),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            Icons.lock_rounded,
+                            size: 13,
+                            color: tileForeground,
+                          ),
                         ),
                       ),
                   ],
@@ -447,8 +714,7 @@ class _RoomTile extends StatelessWidget {
                 room.name,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
+                style: theme.textTheme.labelMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                 ),
               ),
@@ -467,30 +733,40 @@ class _CreateRoomTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return SizedBox(
-      width: 82,
+      width: 92,
       child: Column(
         children: [
           Material(
-            color: Colors.white,
+            color: colorScheme.surface,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
-              side: const BorderSide(color: Color(0xFFD8D5E2)),
+              borderRadius: BorderRadius.circular(AppRadius.medium),
+              side: BorderSide(color: colorScheme.outlineVariant, width: 1.5),
             ),
             clipBehavior: Clip.antiAlias,
             child: InkWell(
               onTap: onTap,
-              child: const SizedBox(
-                width: 72,
-                height: 72,
-                child: Icon(Icons.add_rounded, size: 29),
+              child: SizedBox(
+                width: 82,
+                height: 82,
+                child: Icon(
+                  Icons.add_rounded,
+                  size: 29,
+                  color: colorScheme.primary,
+                ),
               ),
             ),
           ),
           const SizedBox(height: 7),
-          const Text(
+          Text(
             '새 방',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: colorScheme.primary,
+              fontWeight: FontWeight.w800,
+            ),
           ),
         ],
       ),
@@ -553,7 +829,6 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
                 decoration: const InputDecoration(
                   labelText: '방 이름',
                   hintText: '예: 주말 탐험대',
-                  border: OutlineInputBorder(),
                 ),
                 validator: (value) {
                   if (value == null || value.trim().isEmpty) {
@@ -575,10 +850,7 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
                   controller: _passwordController,
                   obscureText: true,
                   maxLength: 12,
-                  decoration: const InputDecoration(
-                    labelText: '비밀번호',
-                    border: OutlineInputBorder(),
-                  ),
+                  decoration: const InputDecoration(labelText: '비밀번호'),
                   validator: (value) {
                     if (_usePassword && (value == null || value.length < 4)) {
                       return '비밀번호는 4자 이상 입력해주세요.';
@@ -659,7 +931,6 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
               decoration: const InputDecoration(
                 labelText: '6자리 방 코드',
                 hintText: 'ABC123',
-                border: OutlineInputBorder(),
               ),
               validator: (value) {
                 if (value == null || value.trim().length != 6) {
@@ -673,10 +944,7 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
               key: const Key('joinPasswordField'),
               controller: _passwordController,
               obscureText: true,
-              decoration: const InputDecoration(
-                labelText: '비밀번호 (있는 경우)',
-                border: OutlineInputBorder(),
-              ),
+              decoration: const InputDecoration(labelText: '비밀번호 (있는 경우)'),
             ),
           ],
         ),
