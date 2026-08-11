@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import 'screens/magazine_screen.dart';
 import 'screens/rooms_screen.dart';
 
 void main() {
@@ -26,7 +27,7 @@ class RandomMissionApp extends StatelessWidget {
         fontFamilyFallback: const ['Noto Sans KR', 'Roboto'],
         useMaterial3: true,
       ),
-      home: skipSplash ? const RoomsScreen() : const _SplashGate(),
+      home: skipSplash ? const _AppShell() : const _SplashGate(),
     );
   }
 }
@@ -60,9 +61,34 @@ class _SplashGateState extends State<_SplashGate> {
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 420),
-      child: _showHome ? const RoomsScreen() : const _SplashScreen(),
+      child: _showHome ? const _AppShell() : const _SplashScreen(),
     );
   }
+}
+
+class _AppShell extends StatefulWidget {
+  const _AppShell();
+
+  @override
+  State<_AppShell> createState() => _AppShellState();
+}
+
+class _AppShellState extends State<_AppShell> {
+  var _selectedIndex = 0;
+  final _pages = const [RoomsScreen(), MagazineScreen()];
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: IndexedStack(index: _selectedIndex, children: _pages),
+        bottomNavigationBar: NavigationBar(
+          selectedIndex: _selectedIndex,
+          onDestinationSelected: (index) => setState(() => _selectedIndex = index),
+          destinations: const [
+            NavigationDestination(icon: Icon(Icons.groups_outlined), selectedIcon: Icon(Icons.groups_rounded), label: '미션'),
+            NavigationDestination(icon: Icon(Icons.auto_stories_outlined), selectedIcon: Icon(Icons.auto_stories_rounded), label: '매거진'),
+          ],
+        ),
+      );
 }
 
 class _SplashScreen extends StatelessWidget {
