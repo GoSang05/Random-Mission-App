@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 enum _PeriodOption { day, week, month, custom }
 
@@ -77,9 +78,89 @@ class _MagazineScreenState extends State<MagazineScreen> {
       return;
     }
     setState(() => _isCreating = true);
-    await Future<void>.delayed(const Duration(milliseconds: 1400));
-    if (!mounted) return;
-    setState(() { _isCreating = false; _showPreview = true; });
+
+    try {
+      final period = _selectedRange();
+      final storage = Supabase.instance.client.storage;
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final photoPaths = <String>[];
+
+      for (var index = 0; index < _photos.length; index++) {
+        final photo = _photos[index];
+        final extension = _fileExtension(photo.path);
+        final path = 'drafts/$timestamp-$index.$extension';
+        await storage.from('magazine-photos').uploadBinary(
+              path,
+              await photo.readAsBytes(),
+              fileOptions: FileOptions(
+                contentType: photo.mimeType ?? 'image/jpeg',
+              ),
+            );
+        photoPaths.add(path);
+      }
+
+      final magazine = await Supabase.instance.client
+          .from('magazines')
+          .insert({
+            'period_start': _dateValue(period.start),
+            'period_end': _dateValue(period.end),
+            'title': '작지만 선명했던 우리의 장면들',
+            'intro_copy': 'AI 편집을 기다리는 매거진 초안입니다.',
+            'cover_photo_path': photoPaths.first,
+            'status': 'draft',
+          })
+          .select('id')
+          .single();
+
+      await Supabase.instance.client.from('magazine_pages').insert({
+        'magazine_id': magazine['id'],
+        'page_number': 1,
+        'photo_paths': photoPaths,
+        'headline': '작지만 선명했던 우리의 장면들',
+        'body': '사진 업로드가 완료되었습니다. AI가 이 장면들을 하나의 이야기로 편집할 예정입니다.',
+      });
+
+      if (!mounted) return;
+      setState(() => _showPreview = true);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('사진과 매거진 초안을 Supabase에 저장했어요.')),
+      );
+    } on StorageException catch (error) {
+      if (mounted) _showSaveError('사진 업로드에 실패했습니다: ${error.message}');
+    } on PostgrestException catch (error) {
+      if (mounted) _showSaveError('매거진 저장에 실패했습니다: ${error.message}');
+    } catch (_) {
+      if (mounted) _showSaveError('저장 중 문제가 발생했습니다. 인터넷 연결과 Supabase 설정을 확인해 주세요.');
+    } finally {
+      if (mounted) setState(() => _isCreating = false);
+    }
+  }
+
+  DateTimeRange _selectedRange() {
+    if (_period == _PeriodOption.custom) return _customRange!;
+    final now = DateTime.now();
+    final end = DateTime(now.year, now.month, now.day);
+    return switch (_period) {
+      _PeriodOption.day => DateTimeRange(start: end, end: end),
+      _PeriodOption.week => DateTimeRange(
+          start: end.subtract(const Duration(days: 6)), end: end),
+      _PeriodOption.month => DateTimeRange(
+          start: DateTime(now.year, now.month - 1, now.day), end: end),
+      _PeriodOption.custom => _customRange!,
+    };
+  }
+
+  String _dateValue(DateTime date) => date.toIso8601String().split('T').first;
+
+  String _fileExtension(String path) {
+    final extension = path.split('.').last.toLowerCase();
+    return RegExp(r'^[a-z0-9]{1,5}$').hasMatch(extension)
+        ? extension
+        : 'jpg';
+  }
+
+  void _showSaveError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
