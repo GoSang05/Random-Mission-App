@@ -1,318 +1,377 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image_picker/image_picker.dart';
 
-import '../models/mission_post.dart';
-import '../models/mission_room.dart';
+import '../data/local_mission_repository.dart';
+import '../models/mission_data.dart';
 import '../widgets/story_card_stack.dart';
+import 'capture_screen.dart';
 import 'mission_feed_screen.dart';
 
 class RoomDetailScreen extends StatefulWidget {
   const RoomDetailScreen({
-    required this.room,
-    required this.posts,
-    required this.onPostsChanged,
+    required this.repository,
+    required this.roomId,
     super.key,
   });
 
-  final MissionRoom room;
-  final List<MissionPost> posts;
-  final VoidCallback onPostsChanged;
+  final LocalMissionRepository repository;
+  final String roomId;
 
   @override
   State<RoomDetailScreen> createState() => _RoomDetailScreenState();
 }
 
 class _RoomDetailScreenState extends State<RoomDetailScreen> {
-  final ImagePicker _imagePicker = ImagePicker();
+  final _messageController = TextEditingController();
 
-  List<String> get _missionItems => [
-    widget.room.mission,
-    '친구의 미션 사진에 반응 남기기',
-    '오늘의 단체 사진 한 장 찍기',
-  ];
+  @override
+  void dispose() {
+    _messageController.dispose();
+    super.dispose();
+  }
 
-  Future<void> _takeMissionPhoto(String mission) async {
+  void _message(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _openCapture(Mission mission) async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => CaptureScreen(
+          missionTitle: mission.title,
+          onSave: (result, onProgress) async {
+            // ponytail: staged local progress; use Storage progress after backend approval.
+            onProgress(0.2);
+            await Future<void>.delayed(const Duration(milliseconds: 120));
+            onProgress(0.7);
+            widget.repository.addSubmission(
+              roomId: widget.roomId,
+              missionId: mission.id,
+              localPath: result.path,
+              mediaKind: result.kind,
+            );
+            onProgress(1);
+          },
+        ),
+      ),
+    );
+    if (saved == true && mounted) _message('미션 인증을 스토리에 저장했어요.');
+  }
+
+  void _openStory(List<MissionSubmission> submissions, int index) {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MissionFeedScreen(
+          repository: widget.repository,
+          roomId: widget.roomId,
+          initialSubmissionId: submissions[index].id,
+        ),
+      ),
+    );
+  }
+
+  void _sendMessage() {
+    final text = _messageController.text;
+    if (text.trim().isEmpty) return;
     try {
-      final photo = await _imagePicker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 85,
-        maxWidth: 1920,
-      );
-      if (photo == null || !mounted) return;
-
-      setState(() {
-        widget.posts.insert(
-          0,
-          MissionPost(
-            author: '나',
-            mission: mission,
-            emoji: '📸',
-            startColor: const Color(0xFF8E86D8),
-            endColor: const Color(0xFF433A7A),
-            sadCount: 0,
-            heartCount: 0,
-            imagePath: photo.path,
-          ),
-        );
-      });
-      widget.onPostsChanged();
-      _showMessage('촬영한 사진을 이 미션에 올렸어요.');
-    } catch (_) {
-      if (mounted) _showMessage('카메라를 열지 못했어요. 권한을 확인해주세요.');
+      widget.repository.sendMessage(widget.roomId, text);
+      _messageController.clear();
+    } on ArgumentError catch (error) {
+      _message(error.message.toString());
     }
   }
 
-  void _copyText(String label, String value) {
-    Clipboard.setData(ClipboardData(text: value));
-    _showMessage('$label을 복사했어요.');
-  }
-
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  void _showRoomSettings() {
+  void _showSettings(MissionRoom room) {
     showDialog<void>(
       context: context,
-      builder: (context) => _RoomSettingsDialog(
-        room: widget.room,
-        onCopyCode: () => _copyText('방 코드', widget.room.code),
-        onCopyPassword: widget.room.password == null
-            ? null
-            : () => _copyText('비밀번호', widget.room.password!),
-      ),
-    );
-  }
-
-  void _openPost(int index) {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (context) => MissionFeedScreen(
-          roomName: widget.room.name,
-          posts: widget.posts,
-          initialIndex: index,
-        ),
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Scaffold(
-      appBar: AppBar(
-        centerTitle: true,
-        title: Text(
-          widget.room.name,
-          style: const TextStyle(fontWeight: FontWeight.w900),
+      builder: (_) => AlertDialog(
+        title: const Text('방 설정'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _InfoRow(
+              label: '방 코드',
+              value: room.code ?? '-',
+              onCopy: room.code == null
+                  ? null
+                  : () {
+                      Clipboard.setData(ClipboardData(text: room.code!));
+                      _message('방 코드를 복사했어요.');
+                    },
+            ),
+            const Divider(),
+            _InfoRow(label: '참여 인원', value: '${room.memberCount}명'),
+          ],
         ),
         actions: [
-          IconButton(
-            key: const Key('roomSettingsButton'),
-            tooltip: '방 설정',
-            onPressed: _showRoomSettings,
-            icon: const Icon(Icons.settings_rounded),
+          FilledButton.tonal(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('닫기'),
           ),
         ],
       ),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 600),
-            child: CustomScrollView(
-              slivers: [
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
-                  sliver: SliverToBoxAdapter(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.fromLTRB(20, 18, 14, 12),
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(24),
-                            border: Border.all(
-                              color: Colors.black.withValues(alpha: 0.05),
-                            ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.repository,
+      builder: (context, _) {
+        final room = widget.repository.roomById(widget.roomId);
+        if (room == null) {
+          return const Scaffold(body: Center(child: Text('방을 찾을 수 없어요.')));
+        }
+        final submissions = widget.repository.submissionsForRoom(room.id);
+        final messages = widget.repository.messagesForRoom(room.id);
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(room.name),
+            actions: [
+              IconButton(
+                key: const Key('roomSettingsButton'),
+                tooltip: '방 설정',
+                onPressed: () => _showSettings(room),
+                icon: const Icon(Icons.settings_rounded),
+              ),
+            ],
+          ),
+          body: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: ListView(
+                        padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
+                        children: [
+                          _SectionHeader(
+                            title: '오늘의 미션',
+                            count: room.missions.length,
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                '오늘의 미션',
-                                style: Theme.of(context).textTheme.titleMedium
-                                    ?.copyWith(fontWeight: FontWeight.w900),
-                              ),
-                              const SizedBox(height: 10),
-                              for (
-                                var index = 0;
-                                index < _missionItems.length;
-                                index++
-                              )
-                                _RoomMissionRow(
-                                  key: Key('roomMission$index'),
-                                  mission: _missionItems[index],
-                                  color: colorScheme.primary,
-                                  onCameraTap: () =>
-                                      _takeMissionPhoto(_missionItems[index]),
+                          const SizedBox(height: 12),
+                          if (room.missions.isEmpty)
+                            const _EmptyCard(text: '오늘 등록된 미션이 없어요.')
+                          else
+                            for (final mission in room.missions)
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 10),
+                                child: _MissionCard(
+                                  mission: mission,
+                                  onCamera: () => _openCapture(mission),
                                 ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 30),
-                        Row(
-                          children: [
-                            Text(
-                              '친구들의 새 사진',
-                              style: Theme.of(context).textTheme.titleLarge
-                                  ?.copyWith(fontWeight: FontWeight.w900),
-                            ),
-                            const Spacer(),
-                            Text(
-                              '${widget.posts.length}개',
-                              style: TextStyle(
-                                color: colorScheme.primary,
-                                fontSize: 12,
-                                fontWeight: FontWeight.w700,
                               ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 14),
-                      ],
+                          const SizedBox(height: 22),
+                          _SectionHeader(
+                            title: '친구들의 새 사진',
+                            count: submissions.length,
+                          ),
+                          const SizedBox(height: 10),
+                          StoryCardStack(
+                            submissions: submissions,
+                            height: 260,
+                            onStoryTap: (index) =>
+                                _openStory(submissions, index),
+                          ),
+                          const SizedBox(height: 26),
+                          _SectionHeader(
+                            title: 'Room Chat',
+                            count: messages.length,
+                          ),
+                          const SizedBox(height: 12),
+                          if (messages.isEmpty)
+                            const _EmptyCard(text: '첫 메시지를 남겨보세요.')
+                          else
+                            for (final message in messages)
+                              _MessageBubble(
+                                message: message,
+                                isMine:
+                                    message.senderUserId ==
+                                    widget.repository.previewUserId,
+                              ),
+                        ],
+                      ),
                     ),
-                  ),
+                    _ChatComposer(
+                      controller: _messageController,
+                      onSend: _sendMessage,
+                    ),
+                  ],
                 ),
-                if (widget.posts.isEmpty)
-                  const SliverPadding(
-                    padding: EdgeInsets.fromLTRB(20, 20, 20, 32),
-                    sliver: SliverToBoxAdapter(
-                      child: Center(
-                        child: Text(
-                          '아직 사진이 없어요.\n미션 옆 카메라로 첫 사진을 남겨보세요.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(color: Colors.black45, height: 1.5),
-                        ),
-                      ),
-                    ),
-                  )
-                else
-                  SliverPadding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 32),
-                    sliver: SliverToBoxAdapter(
-                      child: StoryCardStack(
-                        posts: widget.posts,
-                        height: 290,
-                        onStoryTap: _openPost,
-                      ),
-                    ),
-                  ),
-              ],
+              ),
             ),
           ),
+        );
+      },
+    );
+  }
+}
+
+class _MissionCard extends StatelessWidget {
+  const _MissionCard({required this.mission, required this.onCamera});
+
+  final Mission mission;
+  final VoidCallback onCamera;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+        child: Row(
+          children: [
+            Icon(
+              Icons.bolt_rounded,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                mission.title,
+                style: const TextStyle(
+                  fontWeight: FontWeight.w800,
+                  height: 1.4,
+                ),
+              ),
+            ),
+            IconButton.filledTonal(
+              key: Key('roomCamera_${mission.id}'),
+              tooltip: '이 미션 인증하기',
+              onPressed: onCamera,
+              icon: const Icon(Icons.camera_alt_rounded),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _RoomMissionRow extends StatelessWidget {
-  const _RoomMissionRow({
-    required this.mission,
-    required this.color,
-    required this.onCameraTap,
-    super.key,
-  });
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.count});
 
-  final String mission;
-  final Color color;
-  final VoidCallback onCameraTap;
+  final String title;
+  final int count;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
-      child: Row(
-        children: [
-          Container(
-            width: 6,
-            height: 6,
-            margin: const EdgeInsets.only(right: 10),
-            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+    return Row(
+      children: [
+        Text(title, style: Theme.of(context).textTheme.titleLarge),
+        const Spacer(),
+        Text(
+          '$count',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.primary,
+            fontWeight: FontWeight.w900,
           ),
-          Expanded(
-            child: Text(
-              mission,
-              style: const TextStyle(height: 1.4, fontWeight: FontWeight.w600),
-            ),
-          ),
-          IconButton.filledTonal(
-            tooltip: '이 미션 사진 촬영',
-            onPressed: onCameraTap,
-            icon: const Icon(Icons.camera_alt_rounded, size: 20),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RoomSettingsDialog extends StatelessWidget {
-  const _RoomSettingsDialog({
-    required this.room,
-    required this.onCopyCode,
-    required this.onCopyPassword,
-  });
-
-  final MissionRoom room;
-  final VoidCallback onCopyCode;
-  final VoidCallback? onCopyPassword;
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Row(
-        children: [
-          Icon(Icons.settings_rounded),
-          SizedBox(width: 9),
-          Text('방 설정'),
-        ],
-      ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _SettingsInfoRow(label: '방 코드', value: room.code, onCopy: onCopyCode),
-          const Divider(height: 1),
-          _SettingsInfoRow(
-            label: '비밀번호',
-            value: room.password ?? '설정 안 함',
-            onCopy: onCopyPassword,
-          ),
-          const Divider(height: 1),
-          _SettingsInfoRow(label: '참여 인원', value: '${room.memberCount}명'),
-        ],
-      ),
-      actions: [
-        FilledButton.tonal(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('닫기'),
         ),
       ],
     );
   }
 }
 
-class _SettingsInfoRow extends StatelessWidget {
-  const _SettingsInfoRow({
-    required this.label,
-    required this.value,
-    this.onCopy,
-  });
+class _EmptyCard extends StatelessWidget {
+  const _EmptyCard({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: Text(text, style: const TextStyle(color: Colors.black45)),
+        ),
+      ),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  const _MessageBubble({required this.message, required this.isMine});
+
+  final ChatMessage message;
+  final bool isMine;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    return Align(
+      alignment: isMine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: const BoxConstraints(maxWidth: 360),
+        margin: const EdgeInsets.only(bottom: 9),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: isMine ? colors.primaryContainer : Colors.white,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: colors.outlineVariant),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(message.senderName, style: const TextStyle(fontSize: 11)),
+            const SizedBox(height: 3),
+            Text(message.text),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ChatComposer extends StatelessWidget {
+  const _ChatComposer({required this.controller, required this.onSend});
+
+  final TextEditingController controller;
+  final VoidCallback onSend;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.white,
+      elevation: 8,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  key: const Key('chatMessageField'),
+                  controller: controller,
+                  maxLength: LocalMissionRepository.maxMessageLength,
+                  maxLines: 3,
+                  minLines: 1,
+                  textInputAction: TextInputAction.send,
+                  decoration: const InputDecoration(
+                    hintText: '메시지 보내기',
+                    counterText: '',
+                  ),
+                  onSubmitted: (_) => onSend(),
+                ),
+              ),
+              IconButton.filled(
+                key: const Key('sendChatButton'),
+                tooltip: '메시지 전송',
+                onPressed: onSend,
+                icon: const Icon(Icons.send_rounded),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _InfoRow extends StatelessWidget {
+  const _InfoRow({required this.label, required this.value, this.onCopy});
 
   final String label;
   final String value;
@@ -320,28 +379,22 @@ class _SettingsInfoRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 72,
-            child: Text(label, style: const TextStyle(color: Colors.black54)),
+    return Row(
+      children: [
+        SizedBox(width: 72, child: Text(label)),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(fontWeight: FontWeight.w800),
           ),
-          Expanded(
-            child: Text(
-              value,
-              style: const TextStyle(fontWeight: FontWeight.w800),
-            ),
+        ),
+        if (onCopy != null)
+          IconButton(
+            tooltip: '$label 복사',
+            onPressed: onCopy,
+            icon: const Icon(Icons.copy_rounded),
           ),
-          if (onCopy != null)
-            IconButton(
-              tooltip: '$label 복사',
-              onPressed: onCopy,
-              icon: const Icon(Icons.copy_rounded, size: 20),
-            ),
-        ],
-      ),
+      ],
     );
   }
 }
