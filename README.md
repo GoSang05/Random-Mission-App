@@ -1,6 +1,13 @@
 # random_mission_app
 
-A new Flutter project.
+## Local Supabase configuration
+
+This project never commits Supabase credentials. To run the app locally, copy
+`supabase.env.example.json` to `supabase.env.json` and fill in your project
+URL and publishable key from Supabase Dashboard → Connect.
+
+In VS Code, select **Random Mission App** in the Run and Debug configuration
+dropdown and start debugging with F5.
 
 ## Getting Started
 

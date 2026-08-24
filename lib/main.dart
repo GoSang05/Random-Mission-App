@@ -1,10 +1,31 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import 'screens/auth_gate.dart';
 import 'screens/rooms_screen.dart';
 
-void main() {
+const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+const _supabasePublishableKey = String.fromEnvironment(
+  'SUPABASE_PUBLISHABLE_KEY',
+);
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (_supabaseUrl.isEmpty || _supabasePublishableKey.isEmpty) {
+    throw StateError(
+      'Supabase configuration is missing. Select the "Random Mission App" '
+      'launch configuration in VS Code before starting the app.',
+    );
+  }
+
+  await Supabase.initialize(
+    url: _supabaseUrl,
+    publishableKey: _supabasePublishableKey,
+  );
+
   runApp(const RandomMissionApp());
 }
 
@@ -60,7 +81,7 @@ class _SplashGateState extends State<_SplashGate> {
   Widget build(BuildContext context) {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 420),
-      child: _showHome ? const RoomsScreen() : const _SplashScreen(),
+      child: _showHome ? const AuthGate() : const _SplashScreen(),
     );
   }
 }
