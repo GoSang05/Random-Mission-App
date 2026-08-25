@@ -1,200 +1,191 @@
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
-import '../models/mission_post.dart';
+import '../data/local_mission_repository.dart';
+import '../models/mission_data.dart';
 import '../widgets/doit_logo.dart';
 import '../widgets/story_card_stack.dart';
+import 'capture_screen.dart';
 import 'mission_feed_screen.dart';
 
 class GlobalMissionsScreen extends StatefulWidget {
-  const GlobalMissionsScreen({super.key});
+  const GlobalMissionsScreen({required this.repository, super.key});
+
+  final LocalMissionRepository repository;
 
   @override
   State<GlobalMissionsScreen> createState() => _GlobalMissionsScreenState();
 }
 
 class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
-  static const _missions = [
-    ('하늘에서 가장 마음에 드는 색 찾기', '📷', '오늘 자정까지'),
-    ('5,000원으로 가장 이상한 물건 찾기', '🛍️', '이번 주 일요일까지'),
-    ('친구에게 뜬금없는 칭찬 보내기', '💌', '오늘 자정까지'),
-  ];
+  void _message(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
 
-  final ImagePicker _imagePicker = ImagePicker();
-  final List<List<MissionPost>> _missionPosts = [
-    [
-      const MissionPost(
-        author: '수아',
-        mission: '하늘에서 가장 마음에 드는 색 찾기',
-        emoji: '🌤️',
-        startColor: Color(0xFF77BFEA),
-        endColor: Color(0xFF416B95),
-        sadCount: 1,
-        heartCount: 18,
-      ),
-      const MissionPost(
-        author: '도윤',
-        mission: '하늘에서 가장 마음에 드는 색 찾기',
-        emoji: '🌇',
-        startColor: Color(0xFFF39A79),
-        endColor: Color(0xFF73456D),
-        sadCount: 2,
-        heartCount: 14,
-      ),
-      const MissionPost(
-        author: '하린',
-        mission: '하늘에서 가장 마음에 드는 색 찾기',
-        emoji: '☁️',
-        startColor: Color(0xFFB8D4E8),
-        endColor: Color(0xFF6B7B96),
-        sadCount: 0,
-        heartCount: 9,
-      ),
-    ],
-    [
-      const MissionPost(
-        author: '지훈',
-        mission: '5,000원으로 가장 이상한 물건 찾기',
-        emoji: '🧸',
-        startColor: Color(0xFFE6B36F),
-        endColor: Color(0xFF79553D),
-        sadCount: 5,
-        heartCount: 21,
-      ),
-      const MissionPost(
-        author: '예린',
-        mission: '5,000원으로 가장 이상한 물건 찾기',
-        emoji: '🕶️',
-        startColor: Color(0xFF9A8DC0),
-        endColor: Color(0xFF403756),
-        sadCount: 3,
-        heartCount: 12,
-      ),
-      const MissionPost(
-        author: '민재',
-        mission: '5,000원으로 가장 이상한 물건 찾기',
-        emoji: '🪩',
-        startColor: Color(0xFF8FC6BC),
-        endColor: Color(0xFF315D5E),
-        sadCount: 2,
-        heartCount: 16,
-      ),
-    ],
-    [
-      const MissionPost(
-        author: '서아',
-        mission: '친구에게 뜬금없는 칭찬 보내기',
-        emoji: '💬',
-        startColor: Color(0xFFE89AAE),
-        endColor: Color(0xFF82445F),
-        sadCount: 1,
-        heartCount: 24,
-      ),
-      const MissionPost(
-        author: '태오',
-        mission: '친구에게 뜬금없는 칭찬 보내기',
-        emoji: '💛',
-        startColor: Color(0xFFF1C961),
-        endColor: Color(0xFF9B713A),
-        sadCount: 0,
-        heartCount: 19,
-      ),
-      const MissionPost(
-        author: '유나',
-        mission: '친구에게 뜬금없는 칭찬 보내기',
-        emoji: '🥰',
-        startColor: Color(0xFFC28FB7),
-        endColor: Color(0xFF67426E),
-        sadCount: 2,
-        heartCount: 17,
-      ),
-    ],
-  ];
-
-  Future<void> _takeMissionPhoto(int missionIndex) async {
+  Future<void> _createMission() async {
+    final title = await showDialog<String>(
+      context: context,
+      builder: (_) => const _CreateMissionDialog(),
+    );
+    if (title == null || !mounted) return;
     try {
-      final photo = await _imagePicker.pickImage(
-        source: ImageSource.camera,
-        imageQuality: 85,
-        maxWidth: 1920,
-      );
-      if (photo == null || !mounted) return;
-
-      setState(() {
-        _missionPosts[missionIndex].insert(
-          0,
-          MissionPost(
-            author: '나',
-            mission: _missions[missionIndex].$1,
-            emoji: '📸',
-            startColor: const Color(0xFF8E86D8),
-            endColor: const Color(0xFF433A7A),
-            sadCount: 0,
-            heartCount: 0,
-            imagePath: photo.path,
-          ),
-        );
-      });
-
-      _showMessage('촬영한 사진을 미션 스토리에 올렸어요.');
-    } catch (_) {
-      if (mounted) _showMessage('카메라를 열지 못했어요. 권한을 확인해주세요.');
+      widget.repository.createGlobalMission(title);
+      _message('새 글로벌 미션을 등록했어요.');
+    } on ArgumentError catch (error) {
+      _message(error.message.toString());
     }
   }
 
-  void _openStory(int missionIndex, int postIndex) {
+  Future<void> _openCapture(MissionRoom room, Mission mission) async {
+    final saved = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => CaptureScreen(
+          missionTitle: mission.title,
+          onSave: (result, onProgress) async {
+            // ponytail: staged local progress; use Storage progress after backend approval.
+            onProgress(0.2);
+            await Future<void>.delayed(const Duration(milliseconds: 120));
+            onProgress(0.7);
+            widget.repository.addSubmission(
+              roomId: room.id,
+              missionId: mission.id,
+              localPath: result.path,
+              mediaKind: result.kind,
+            );
+            onProgress(1);
+          },
+        ),
+      ),
+    );
+    if (saved == true && mounted) _message('글로벌 스토리에 인증을 저장했어요.');
+  }
+
+  void _openStory(MissionRoom room, List<MissionSubmission> posts, int index) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) => MissionFeedScreen(
-          roomName: 'Global Mission ${missionIndex + 1}',
-          posts: _missionPosts[missionIndex],
-          initialIndex: postIndex,
+        builder: (_) => MissionFeedScreen(
+          repository: widget.repository,
+          roomId: room.id,
+          initialSubmissionId: posts[index].id,
         ),
       ),
     );
   }
 
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: widget.repository,
+      builder: (context, _) {
+        final room = widget.repository.globalRoom;
+        if (room == null) {
+          return const Scaffold(body: Center(child: Text('글로벌 방을 불러오지 못했어요.')));
+        }
+        final roomSubmissions = widget.repository.submissionsForRoom(room.id);
+
+        return Scaffold(
+          appBar: AppBar(title: const DoitLogo(fontSize: 24)),
+          body: SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Global Mission Room',
+                                style: Theme.of(
+                                  context,
+                                ).textTheme.headlineSmall,
+                              ),
+                              const SizedBox(height: 5),
+                              Text('${room.memberCount}명이 함께 도전 중이에요.'),
+                            ],
+                          ),
+                        ),
+                        FilledButton.icon(
+                          key: const Key('createGlobalMissionButton'),
+                          onPressed: _createMission,
+                          icon: const Icon(Icons.add_rounded),
+                          label: const Text('미션 만들기'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    const _AiMissionNotice(),
+                    const SizedBox(height: 20),
+                    if (room.missions.isEmpty)
+                      const _EmptyGlobalMissions()
+                    else
+                      for (
+                        var index = 0;
+                        index < room.missions.length;
+                        index++
+                      ) ...[
+                        Builder(
+                          builder: (context) {
+                            final mission = room.missions[index];
+                            final posts = roomSubmissions
+                                .where((post) => post.missionId == mission.id)
+                                .toList();
+                            return _GlobalMissionCard(
+                              number: index + 1,
+                              mission: mission,
+                              posts: posts,
+                              isUserCreated:
+                                  mission.createdByUserId ==
+                                  widget.repository.previewUserId,
+                              onCapture: () => _openCapture(room, mission),
+                              onStoryTap: (postIndex) =>
+                                  _openStory(room, posts, postIndex),
+                            );
+                          },
+                        ),
+                        if (index != room.missions.length - 1)
+                          const SizedBox(height: 14),
+                      ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
+}
+
+class _AiMissionNotice extends StatelessWidget {
+  const _AiMissionNotice();
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(centerTitle: true, title: const DoitLogo(fontSize: 24)),
-      body: SafeArea(
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(20, 18, 20, 32),
-          children: [
-            Text(
-              'Global Missions',
-              style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                fontWeight: FontWeight.w900,
-                letterSpacing: -1,
+    return Container(
+      key: const Key('futureAiMissionNotice'),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF24212B),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.auto_awesome_rounded, color: Color(0xFFFFD580)),
+          SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              'AI 미션 추천은 제공업체와 보안 방식이 승인된 뒤 연결됩니다.',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w700,
               ),
             ),
-            const SizedBox(height: 7),
-            const Text(
-              '모두가 같은 미션을 어떻게 즐겼는지 확인해보세요.',
-              style: TextStyle(color: Colors.black54, height: 1.5),
-            ),
-            const SizedBox(height: 24),
-            for (var index = 0; index < _missions.length; index++) ...[
-              _GlobalMissionCard(
-                number: index + 1,
-                title: _missions[index].$1,
-                emoji: _missions[index].$2,
-                due: _missions[index].$3,
-                posts: _missionPosts[index],
-                onCameraTap: () => _takeMissionPhoto(index),
-                onStoryTap: (postIndex) => _openStory(index, postIndex),
-              ),
-              if (index != _missions.length - 1) const SizedBox(height: 14),
-            ],
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -203,99 +194,157 @@ class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
 class _GlobalMissionCard extends StatelessWidget {
   const _GlobalMissionCard({
     required this.number,
-    required this.title,
-    required this.emoji,
-    required this.due,
+    required this.mission,
     required this.posts,
-    required this.onCameraTap,
+    required this.isUserCreated,
+    required this.onCapture,
     required this.onStoryTap,
   });
 
   final int number;
-  final String title;
-  final String emoji;
-  final String due;
-  final List<MissionPost> posts;
-  final VoidCallback onCameraTap;
+  final Mission mission;
+  final List<MissionSubmission> posts;
+  final bool isUserCreated;
+  final VoidCallback onCapture;
   final ValueChanged<int> onStoryTap;
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.black.withValues(alpha: 0.05)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                alignment: Alignment.center,
-                decoration: BoxDecoration(
-                  color: colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(17),
+    final colors = Theme.of(context).colorScheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: colors.primaryContainer,
+                  child: Text(
+                    '$number',
+                    style: const TextStyle(fontWeight: FontWeight.w900),
+                  ),
                 ),
-                child: Text(emoji, style: const TextStyle(fontSize: 25)),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'MISSION $number',
-                      style: TextStyle(
-                        color: colorScheme.primary,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        isUserCreated ? 'USER MISSION' : 'TODAY\'S MISSION',
+                        style: TextStyle(
+                          color: colors.primary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w800,
+                      const SizedBox(height: 4),
+                      Text(
+                        mission.title,
+                        style: Theme.of(context).textTheme.titleMedium,
                       ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(due, style: const TextStyle(color: Colors.black45)),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              IconButton.filledTonal(
-                key: Key('globalCamera$number'),
-                tooltip: '이 미션 사진 촬영',
-                onPressed: onCameraTap,
-                icon: const Icon(Icons.camera_alt_rounded),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          const Divider(height: 1),
-          const SizedBox(height: 14),
-          Text(
-            'MISSION STORIES',
-            style: TextStyle(
-              color: colorScheme.primary,
-              fontSize: 10,
-              fontWeight: FontWeight.w900,
-              letterSpacing: 1,
+                IconButton.filledTonal(
+                  key: Key('globalCamera$number'),
+                  tooltip: '이 미션 인증하기',
+                  onPressed: onCapture,
+                  icon: const Icon(Icons.camera_alt_rounded),
+                ),
+              ],
             ),
-          ),
-          const SizedBox(height: 10),
-          StoryCardStack(posts: posts, height: 178, onStoryTap: onStoryTap),
-        ],
+            const SizedBox(height: 14),
+            const Divider(),
+            const SizedBox(height: 12),
+            Text(
+              'MISSION STORIES · ${posts.length}',
+              style: TextStyle(
+                color: colors.primary,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1,
+              ),
+            ),
+            const SizedBox(height: 8),
+            StoryCardStack(
+              submissions: posts,
+              height: 190,
+              onStoryTap: onStoryTap,
+            ),
+          ],
+        ),
       ),
+    );
+  }
+}
+
+class _EmptyGlobalMissions extends StatelessWidget {
+  const _EmptyGlobalMissions();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Card(
+      child: Padding(
+        padding: EdgeInsets.all(24),
+        child: Center(child: Text('아직 공개 미션이 없어요. 첫 미션을 만들어보세요.')),
+      ),
+    );
+  }
+}
+
+class _CreateMissionDialog extends StatefulWidget {
+  const _CreateMissionDialog();
+
+  @override
+  State<_CreateMissionDialog> createState() => _CreateMissionDialogState();
+}
+
+class _CreateMissionDialogState extends State<_CreateMissionDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.of(context).pop(_controller.text.trim());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('글로벌 미션 만들기'),
+      content: Form(
+        key: _formKey,
+        child: TextFormField(
+          key: const Key('globalMissionTitleField'),
+          controller: _controller,
+          autofocus: true,
+          maxLength: LocalMissionRepository.maxMissionTitleLength,
+          maxLines: 3,
+          decoration: const InputDecoration(hintText: '예: 오늘 가장 재미있는 간판 찍기'),
+          validator: (value) =>
+              value == null || value.trim().isEmpty ? '미션 내용을 입력해주세요.' : null,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('취소'),
+        ),
+        FilledButton(
+          key: const Key('confirmGlobalMissionButton'),
+          onPressed: _submit,
+          child: const Text('등록하기'),
+        ),
+      ],
     );
   }
 }

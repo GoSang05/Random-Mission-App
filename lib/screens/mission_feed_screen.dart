@@ -1,285 +1,325 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 
-import '../models/mission_post.dart';
+import '../data/local_mission_repository.dart';
+import '../models/mission_data.dart';
 import '../widgets/mission_photo.dart';
 
 class MissionFeedScreen extends StatefulWidget {
   const MissionFeedScreen({
-    required this.roomName,
-    required this.posts,
-    required this.initialIndex,
+    required this.repository,
+    required this.roomId,
+    required this.initialSubmissionId,
     super.key,
   });
 
-  final String roomName;
-  final List<MissionPost> posts;
-  final int initialIndex;
+  final LocalMissionRepository repository;
+  final String roomId;
+  final String initialSubmissionId;
 
   @override
   State<MissionFeedScreen> createState() => _MissionFeedScreenState();
 }
 
-class _MissionFeedScreenState extends State<MissionFeedScreen>
-    with SingleTickerProviderStateMixin {
+class _MissionFeedScreenState extends State<MissionFeedScreen> {
   late final PageController _pageController;
-  late final AnimationController _entryController;
   late int _currentIndex;
-  final Set<int> _downReactions = {};
-  final Set<int> _upReactions = {};
 
   @override
   void initState() {
     super.initState();
-    _currentIndex = widget.initialIndex;
-    _pageController = PageController(initialPage: widget.initialIndex);
-    _entryController = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 520),
-    )..forward();
+    final submissions = widget.repository.submissionsForRoom(widget.roomId);
+    final initial = submissions.indexWhere(
+      (submission) => submission.id == widget.initialSubmissionId,
+    );
+    _currentIndex = initial < 0 ? 0 : initial;
+    _pageController = PageController(initialPage: _currentIndex);
   }
 
   @override
   void dispose() {
     _pageController.dispose();
-    _entryController.dispose();
     super.dispose();
   }
 
-  void _onPageChanged(int index) {
-    setState(() => _currentIndex = index);
-    _entryController
-      ..reset()
-      ..forward();
-  }
-
-  void _toggleReaction({required bool isUp}) {
-    final selected = isUp ? _upReactions : _downReactions;
-    final opposite = isUp ? _downReactions : _upReactions;
-
-    setState(() {
-      if (!selected.add(_currentIndex)) {
-        selected.remove(_currentIndex);
-      } else {
-        opposite.remove(_currentIndex);
-      }
-    });
+  void _vote(MissionSubmission submission, VoteChoice choice) {
+    final changed = widget.repository.castVote(submission.id, choice);
+    if (!changed) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('이미 같은 선택으로 투표했어요.')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF17151D),
-      body: PageView.builder(
-        controller: _pageController,
-        itemCount: widget.posts.length,
-        onPageChanged: _onPageChanged,
-        itemBuilder: (context, index) {
-          final post = widget.posts[index];
+    return AnimatedBuilder(
+      animation: widget.repository,
+      builder: (context, _) {
+        final room = widget.repository.roomById(widget.roomId);
+        final submissions = widget.repository.submissionsForRoom(widget.roomId);
+        if (room == null || submissions.isEmpty) {
+          return Scaffold(
+            appBar: AppBar(),
+            body: const Center(child: Text('표시할 스토리가 없어요.')),
+          );
+        }
 
-          return AnimatedBuilder(
-            animation: Listenable.merge([_pageController, _entryController]),
-            builder: (context, child) {
-              var currentPage = widget.initialIndex.toDouble();
-              if (_pageController.hasClients &&
-                  _pageController.position.haveDimensions) {
-                currentPage = _pageController.page ?? currentPage;
-              }
-
-              final distance = (currentPage - index).abs().clamp(0.0, 1.0);
-              final direction = (currentPage - index).clamp(-1.0, 1.0);
-              final swipeScale = 1 - distance * 0.07;
-              final entryValue = Curves.easeOutCubic.transform(
-                _entryController.value,
+        _currentIndex = _currentIndex.clamp(0, submissions.length - 1);
+        return Scaffold(
+          backgroundColor: const Color(0xFF17151D),
+          body: PageView.builder(
+            controller: _pageController,
+            itemCount: submissions.length,
+            onPageChanged: (index) => setState(() => _currentIndex = index),
+            itemBuilder: (context, index) {
+              final submission = submissions[index];
+              final mission = widget.repository.missionById(
+                widget.roomId,
+                submission.missionId,
               );
-              final entryScale = 0.965 + entryValue * 0.035;
-
-              return Opacity(
-                opacity: max(0.0, (1 - distance * 0.32) * entryValue),
-                child: Transform.scale(
-                  scale: swipeScale * entryScale,
-                  child: Transform(
-                    alignment: Alignment.center,
-                    transform: Matrix4.identity()
-                      ..setEntry(3, 2, 0.001)
-                      ..rotateY(direction * -0.1),
-                    child: child,
-                  ),
-                ),
+              return _StoryPage(
+                roomName: room.name,
+                missionTitle: mission?.title ?? '미션',
+                submission: submission,
+                position: index + 1,
+                total: submissions.length,
+                onBack: () => Navigator.of(context).pop(),
+                onVote: (choice) => _vote(submission, choice),
               );
             },
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _StoryPage extends StatelessWidget {
+  const _StoryPage({
+    required this.roomName,
+    required this.missionTitle,
+    required this.submission,
+    required this.position,
+    required this.total,
+    required this.onBack,
+    required this.onVote,
+  });
+
+  final String roomName;
+  final String missionTitle;
+  final MissionSubmission submission;
+  final int position;
+  final int total;
+  final VoidCallback onBack;
+  final ValueChanged<VoteChoice> onVote;
+
+  @override
+  Widget build(BuildContext context) {
+    final accepted = submission.acceptedVotes;
+    final rejected = submission.notAcceptedVotes;
+    final hasVotes = accepted + rejected > 0;
+    final approved = hasVotes && accepted > rejected;
+    final statusColor = !hasVotes
+        ? const Color(0xFF68656F)
+        : approved
+        ? const Color(0xFF4F9A63)
+        : const Color(0xFFB85B55);
+    final statusText = !hasVotes
+        ? '투표를 기다리는 중'
+        : approved
+        ? '현재 승인됨'
+        : '현재 미승인';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          MissionPhoto(
+            submission: submission,
+            borderRadius: 30,
+            showAuthor: false,
+          ),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(30),
+            child: const DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xAA000000),
+                    Colors.transparent,
+                    Color(0xCC000000),
+                  ],
+                  stops: [0, 0.52, 1],
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(9, 8, 9, 12),
-              child: Stack(
-                fit: StackFit.expand,
+              padding: const EdgeInsets.fromLTRB(12, 7, 12, 20),
+              child: Column(
                 children: [
-                  MissionPhoto(post: post, borderRadius: 30, showAuthor: false),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(30),
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Colors.black.withValues(alpha: 0.42),
-                            Colors.transparent,
-                            Colors.black.withValues(alpha: 0.58),
-                          ],
-                          stops: const [0, 0.5, 1],
+                  Row(
+                    children: [
+                      IconButton.filledTonal(
+                        onPressed: onBack,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.black38,
+                          foregroundColor: Colors.white,
                         ),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                      ),
+                      Expanded(
+                        child: Text(
+                          roomName,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      SizedBox(
+                        width: 48,
+                        child: Text(
+                          '$position/$total',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 11,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withValues(alpha: 0.86),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Text(
+                      missionTitle,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                  ),
+                  const Spacer(),
+                  Text(
+                    submission.authorName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 9),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 6,
+                    ),
+                    decoration: BoxDecoration(
+                      color: statusColor.withValues(alpha: 0.88),
+                      borderRadius: BorderRadius.circular(99),
+                    ),
+                    child: Text(
+                      statusText,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w800,
                       ),
                     ),
                   ),
-                  SafeArea(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 7, 12, 20),
-                      child: Column(
-                        children: [
-                          Row(
-                            children: [
-                              IconButton.filledTonal(
-                                onPressed: () => Navigator.of(context).pop(),
-                                icon: const Icon(Icons.arrow_back_rounded),
-                                style: IconButton.styleFrom(
-                                  backgroundColor: Colors.black38,
-                                  foregroundColor: Colors.white,
-                                ),
-                              ),
-                              Expanded(
-                                child: Text(
-                                  widget.roomName,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.w900,
-                                    shadows: [
-                                      Shadow(
-                                        blurRadius: 8,
-                                        color: Colors.black45,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                              SizedBox(
-                                width: 48,
-                                child: Center(
-                                  child: Text(
-                                    '${index + 1}/${widget.posts.length}',
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 11,
-                            ),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.76),
-                              borderRadius: BorderRadius.circular(99),
-                              border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.36),
-                              ),
-                            ),
-                            child: Text(
-                              post.mission,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Color(0xFF25212B),
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                          const Spacer(),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              _ThumbButton(
-                                key: const Key('thumbDownButton'),
-                                icon: Icons.thumb_down_alt_rounded,
-                                color: const Color(0xFFBD665C),
-                                selected: _downReactions.contains(index),
-                                onTap: () => _toggleReaction(isUp: false),
-                              ),
-                              const SizedBox(width: 18),
-                              _ThumbButton(
-                                key: const Key('thumbUpButton'),
-                                icon: Icons.thumb_up_alt_rounded,
-                                color: const Color(0xFF67A86C),
-                                selected: _upReactions.contains(index),
-                                onTap: () => _toggleReaction(isUp: true),
-                              ),
-                            ],
-                          ),
-                        ],
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: _VoteButton(
+                          buttonKey: const Key('thumbDownButton'),
+                          icon: Icons.thumb_down_alt_rounded,
+                          label: 'Not Accepted',
+                          count: rejected,
+                          color: const Color(0xFFBD665C),
+                          selected:
+                              submission.currentUserVote ==
+                              VoteChoice.notAccepted,
+                          onTap: () => onVote(VoteChoice.notAccepted),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _VoteButton(
+                          buttonKey: const Key('thumbUpButton'),
+                          icon: Icons.thumb_up_alt_rounded,
+                          label: 'Accepted',
+                          count: accepted,
+                          color: const Color(0xFF5C9F68),
+                          selected:
+                              submission.currentUserVote == VoteChoice.accepted,
+                          onTap: () => onVote(VoteChoice.accepted),
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
             ),
-          );
-        },
+          ),
+        ],
       ),
     );
   }
 }
 
-class _ThumbButton extends StatelessWidget {
-  const _ThumbButton({
+class _VoteButton extends StatelessWidget {
+  const _VoteButton({
+    required this.buttonKey,
     required this.icon,
+    required this.label,
+    required this.count,
     required this.color,
     required this.selected,
     required this.onTap,
-    super.key,
   });
 
+  final Key buttonKey;
   final IconData icon;
+  final String label;
+  final int count;
   final Color color;
   final bool selected;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedScale(
-      scale: selected ? 1.08 : 1,
-      duration: const Duration(milliseconds: 180),
-      curve: Curves.easeOutBack,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(22),
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 180),
-            width: 94,
-            height: 58,
-            decoration: BoxDecoration(
-              color: selected ? color : color.withValues(alpha: 0.72),
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: Colors.white.withValues(alpha: selected ? 0.82 : 0.3),
-                width: selected ? 2 : 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: color.withValues(alpha: selected ? 0.55 : 0.28),
-                  blurRadius: selected ? 20 : 10,
-                  offset: const Offset(0, 6),
-                ),
-              ],
-            ),
-            child: Icon(icon, color: Colors.white, size: 27),
+    return Semantics(
+      button: true,
+      selected: selected,
+      label: '$label, $count표',
+      child: FilledButton.icon(
+        key: buttonKey,
+        onPressed: onTap,
+        style: FilledButton.styleFrom(
+          backgroundColor: selected ? color : color.withValues(alpha: 0.72),
+          foregroundColor: Colors.white,
+          side: BorderSide(
+            color: selected ? Colors.white : Colors.white30,
+            width: 2,
           ),
+        ),
+        icon: Icon(icon),
+        label: Text(
+          '$label · $count',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ),
     );

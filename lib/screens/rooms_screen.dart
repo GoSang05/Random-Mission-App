@@ -1,9 +1,9 @@
-import 'dart:math';
-
 import 'package:flutter/material.dart';
 
-import '../models/mission_post.dart';
-import '../models/mission_room.dart';
+import '../data/chat_repository.dart';
+import '../data/local_mission_repository.dart';
+import '../models/mission_data.dart';
+import '../theme/app_theme.dart';
 import '../widgets/doit_logo.dart';
 import '../widgets/story_card_stack.dart';
 import 'global_missions_screen.dart';
@@ -11,332 +11,318 @@ import 'mission_feed_screen.dart';
 import 'room_detail_screen.dart';
 
 class RoomsScreen extends StatefulWidget {
-  const RoomsScreen({super.key});
+  const RoomsScreen({required this.repository, this.chatRepository, super.key});
+
+  final LocalMissionRepository repository;
+  final ChatRepository? chatRepository;
 
   @override
   State<RoomsScreen> createState() => _RoomsScreenState();
 }
 
 class _RoomsScreenState extends State<RoomsScreen> {
-  static const _codeCharacters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-  static const _missions = [
-    '영화 포스터처럼 단체 사진 찍기',
-    '각자 3,000원 이하 간식 하나 골라오기',
-    '빨간색 물건 5개 찾아서 인증하기',
-    '평소 가지 않던 길로 함께 산책하기',
-    '서로에게 가장 안 어울리는 음료 골라주기',
-  ];
+  @override
+  void initState() {
+    super.initState();
+    widget.repository.initialize();
+  }
 
-  final Random _random = Random();
-  final List<MissionRoom> _rooms = [
-    MissionRoom(
-      name: '야식단',
-      code: 'FRI824',
-      emoji: '🚕',
-      mission: '각자 3,000원 이하 간식 하나 골라오기',
-      memberCount: 4,
-      isJoined: true,
-    ),
-    MissionRoom(
-      name: '탐험대',
-      code: 'CAMPUS',
-      emoji: '🚕',
-      mission: '빨간색 물건 5개 찾아서 인증하기',
-      password: '1234',
-      memberCount: 3,
-      isJoined: true,
-    ),
-    MissionRoom(
-      name: '산책 클럽',
-      code: 'WALK77',
-      emoji: '🌿',
-      mission: '평소 가지 않던 길로 함께 산책하기',
-      memberCount: 2,
-    ),
-  ];
-  final Map<String, List<MissionPost>> _postsByRoom = {
-    'FRI824': [
-      const MissionPost(
-        author: '민수',
-        mission: '각자 3,000원 이하 간식 하나 골라오기',
-        emoji: '🍪',
-        startColor: Color(0xFFF0A56B),
-        endColor: Color(0xFF7E4935),
-        sadCount: 3,
-        heartCount: 11,
-      ),
-      const MissionPost(
-        author: '서연',
-        mission: '오늘의 단체 사진 한 장 찍기',
-        emoji: '📸',
-        startColor: Color(0xFF8684B9),
-        endColor: Color(0xFF272644),
-        sadCount: 2,
-        heartCount: 14,
-      ),
-    ],
-    'CAMPUS': [
-      const MissionPost(
-        author: '지윤',
-        mission: '빨간색 물건 5개 찾아서 인증하기',
-        emoji: '🔴',
-        startColor: Color(0xFFE78A94),
-        endColor: Color(0xFF6D2A3A),
-        sadCount: 1,
-        heartCount: 8,
-      ),
-      const MissionPost(
-        author: '현우',
-        mission: '친구의 미션 사진에 반응 남기기',
-        emoji: '🙌',
-        startColor: Color(0xFF73B8A8),
-        endColor: Color(0xFF285B57),
-        sadCount: 4,
-        heartCount: 10,
-      ),
-    ],
-    'WALK77': [
-      const MissionPost(
-        author: '유진',
-        mission: '평소 가지 않던 길로 함께 산책하기',
-        emoji: '🌿',
-        startColor: Color(0xFFA7C985),
-        endColor: Color(0xFF3F6648),
-        sadCount: 0,
-        heartCount: 6,
-      ),
-    ],
-  };
+  void _message(String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
 
-  List<MissionRoom> get _joinedRooms =>
-      _rooms.where((room) => room.isJoined).toList();
+  Future<void> _createRoom() async {
+    final name = await showDialog<String>(
+      context: context,
+      builder: (_) => const _CreateRoomDialog(),
+    );
+    if (name == null || !mounted) return;
 
-  List<({MissionRoom room, MissionPost post, int index})> get _homeStories {
-    final stories = <({MissionRoom room, MissionPost post, int index})>[];
-    for (final room in _joinedRooms) {
-      final posts = _postsByRoom[room.code] ?? const <MissionPost>[];
-      for (var index = 0; index < posts.length; index++) {
-        stories.add((room: room, post: posts[index], index: index));
+    try {
+      final room = widget.repository.createRoom(name);
+      final chatRepository = widget.chatRepository;
+      if (chatRepository != null) {
+        await chatRepository.ensureRoomConversation(room);
       }
+      _message('${room.name} 방을 만들었어요. 초대 코드: ${room.code}');
+    } on ArgumentError catch (error) {
+      _message(error.message.toString());
+    } on ChatRepositoryException catch (error) {
+      _message('${error.message} 방을 열면 다시 연결을 시도해요.');
     }
-    return stories;
   }
 
-  String _createUniqueCode() {
-    String code;
-    do {
-      code = List.generate(
-        6,
-        (_) => _codeCharacters[_random.nextInt(_codeCharacters.length)],
-      ).join();
-    } while (_rooms.any((room) => room.code == code));
-    return code;
-  }
-
-  Future<void> _showCreateRoomDialog() async {
-    final result = await showDialog<_CreateRoomResult>(
+  Future<void> _joinRoom() async {
+    final code = await showDialog<String>(
       context: context,
-      builder: (context) => const _CreateRoomDialog(),
+      builder: (_) => const _JoinRoomDialog(),
     );
+    if (code == null || !mounted) return;
 
-    if (result == null || !mounted) return;
-
-    final room = MissionRoom(
-      name: result.name,
-      code: _createUniqueCode(),
-      emoji: ['🚀', '🎉', '🔥', '✨'][_random.nextInt(4)],
-      mission: _missions[_random.nextInt(_missions.length)],
-      password: result.password,
-      memberCount: 1,
-      isJoined: true,
-    );
-
-    setState(() {
-      _rooms.insert(0, room);
-      _postsByRoom[room.code] = [];
-    });
-    _showMessage('${room.name} 방을 만들었어요. 코드: ${room.code}');
-  }
-
-  Future<void> _showJoinRoomDialog() async {
-    final result = await showDialog<_JoinRoomResult>(
-      context: context,
-      builder: (context) => const _JoinRoomDialog(),
-    );
-
-    if (result == null || !mounted) return;
-
-    final roomIndex = _rooms.indexWhere(
-      (room) => room.code == result.code.toUpperCase(),
-    );
-
-    if (roomIndex == -1) {
-      _showMessage('일치하는 방이 없어요. 코드를 다시 확인해주세요.');
+    final localResult = widget.repository.joinRoom(code);
+    final chatRepository = widget.chatRepository;
+    if (chatRepository == null) {
+      _message(switch (localResult) {
+        JoinRoomResult.joined => '방에 참여했어요!',
+        JoinRoomResult.alreadyJoined => '이미 참여 중인 방이에요.',
+        JoinRoomResult.invalidCode => '영문과 숫자로 된 코드를 확인해주세요.',
+        JoinRoomResult.roomNotFound => '일치하는 방을 찾지 못했어요.',
+      });
       return;
     }
 
-    final room = _rooms[roomIndex];
-    if (room.isJoined) {
-      _showMessage('이미 참여 중인 방이에요.');
+    if (localResult == JoinRoomResult.invalidCode) {
+      _message('영문과 숫자로 된 코드를 확인해주세요.');
       return;
     }
-
-    if (room.isLocked && room.password != result.password) {
-      _showMessage('비밀번호가 맞지 않아요.');
-      return;
+    try {
+      final joined = await chatRepository.joinRoomByCode(code);
+      widget.repository.importJoinedRoom(
+        id: joined.roomId,
+        name: joined.roomName,
+        code: joined.inviteCode,
+        memberCount: joined.memberCount,
+      );
+      _message(
+        localResult == JoinRoomResult.alreadyJoined
+            ? '이미 참여 중인 방이에요.'
+            : '방에 참여했어요!',
+      );
+    } on ChatRepositoryException catch (error) {
+      _message(error.message);
     }
-
-    setState(() {
-      room.isJoined = true;
-      room.memberCount += 1;
-    });
-    _showMessage('${room.name} 방에 참여했어요!');
-  }
-
-  void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   void _openRoom(MissionRoom room) {
-    final posts = _postsByRoom.putIfAbsent(room.code, () => []);
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) => RoomDetailScreen(
-          room: room,
-          posts: posts,
-          onPostsChanged: () {
-            if (mounted) setState(() {});
-          },
+        builder: (_) => RoomDetailScreen(
+          repository: widget.repository,
+          chatRepository: widget.chatRepository,
+          roomId: room.id,
         ),
       ),
     );
   }
 
-  void _openHomeStory(MissionRoom room, List<MissionPost> posts, int index) {
+  void _openStory(MissionSubmission submission) {
+    final room = widget.repository.roomById(submission.roomId);
+    if (room == null) return;
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) => MissionFeedScreen(
-          roomName: room.name,
-          posts: posts,
-          initialIndex: index,
+        builder: (_) => MissionFeedScreen(
+          repository: widget.repository,
+          roomId: room.id,
+          initialSubmissionId: submission.id,
         ),
       ),
     );
   }
 
-  void _openGlobalMissions() {
+  void _openGlobalRoom() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (context) => const GlobalMissionsScreen(),
+        builder: (_) => GlobalMissionsScreen(repository: widget.repository),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
+    return AnimatedBuilder(
+      animation: widget.repository,
+      builder: (context, _) {
+        return switch (widget.repository.status) {
+          RepositoryStatus.idle ||
+          RepositoryStatus.loading => const _HomeLoading(),
+          RepositoryStatus.error => _HomeError(
+            message: widget.repository.errorMessage,
+            onRetry: widget.repository.initialize,
+          ),
+          RepositoryStatus.ready => _buildHome(),
+        };
+      },
+    );
+  }
+
+  Widget _buildHome() {
+    final rooms = widget.repository.joinedRooms;
+    final stories = widget.repository.recentPrivateSubmissions;
 
     return Scaffold(
       key: const ValueKey('rooms'),
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 600),
+            constraints: const BoxConstraints(maxWidth: 640),
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(20, 22, 20, 32),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.page,
+                18,
+                AppSpacing.page,
+                40,
+              ),
               children: [
-                const Center(child: DoitLogo()),
-                const SizedBox(height: 30),
-                _GlobalMissionBanner(onTap: _openGlobalMissions),
-                const SizedBox(height: 30),
+                const _HomeHeader(),
+                const SizedBox(height: 16),
+                const _PreviewNotice(),
+                const SizedBox(height: 16),
+                _GlobalMissionBanner(onTap: _openGlobalRoom),
+                const SizedBox(height: 14),
                 Row(
                   children: [
-                    Text(
-                      'My Rooms',
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w900,
+                    Expanded(
+                      child: _QuickAction(
+                        buttonKey: const Key('joinRoomButton'),
+                        icon: Icons.key_rounded,
+                        label: '코드로 참여',
+                        onTap: _joinRoom,
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 3,
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _QuickAction(
+                        buttonKey: const Key('createRoomButton'),
+                        icon: Icons.add_rounded,
+                        label: '새 방 만들기',
+                        primary: true,
+                        onTap: _createRoom,
                       ),
-                      decoration: BoxDecoration(
-                        color: colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(99),
-                      ),
-                      child: Text(
-                        '${_joinedRooms.length}',
-                        style: TextStyle(
-                          color: colorScheme.onPrimaryContainer,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      key: const Key('joinRoomButton'),
-                      tooltip: '코드로 참여',
-                      onPressed: _showJoinRoomDialog,
-                      icon: const Icon(Icons.key_rounded),
-                    ),
-                    IconButton.filled(
-                      key: const Key('createRoomButton'),
-                      tooltip: '새 방 만들기',
-                      onPressed: _showCreateRoomDialog,
-                      icon: const Icon(Icons.add_rounded),
                     ),
                   ],
                 ),
+                const SizedBox(height: 30),
+                _SectionTitle(title: 'My Rooms', count: rooms.length),
                 const SizedBox(height: 14),
-                SizedBox(
-                  height: 112,
-                  child: ListView.separated(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: _joinedRooms.length + 1,
-                    separatorBuilder: (_, _) => const SizedBox(width: 13),
-                    itemBuilder: (context, index) {
-                      if (index == _joinedRooms.length) {
-                        return _CreateRoomTile(onTap: _showCreateRoomDialog);
-                      }
-                      final room = _joinedRooms[index];
-                      return _RoomTile(
-                        room: room,
-                        onTap: () => _openRoom(room),
-                      );
-                    },
+                if (rooms.isEmpty)
+                  _EmptyRooms(onCreate: _createRoom)
+                else
+                  SizedBox(
+                    height: 116,
+                    child: ListView.separated(
+                      key: const Key('roomsList'),
+                      scrollDirection: Axis.horizontal,
+                      itemCount: rooms.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 12),
+                      itemBuilder: (_, index) {
+                        final room = rooms[index];
+                        return _RoomTile(
+                          room: room,
+                          onTap: () => _openRoom(room),
+                        );
+                      },
+                    ),
                   ),
-                ),
-                const SizedBox(height: 34),
-                Text(
-                  'Friends Stories',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
-                ),
-                const SizedBox(height: 14),
+                const SizedBox(height: 30),
+                _SectionTitle(title: 'Friends Stories', count: stories.length),
+                const SizedBox(height: 12),
                 StoryCardStack(
                   key: const Key('homeStories'),
-                  posts: [for (final story in _homeStories) story.post],
-                  height: 226,
-                  onStoryTap: (index) {
-                    final story = _homeStories[index];
-                    _openHomeStory(
-                      story.room,
-                      _postsByRoom[story.room.code]!,
-                      story.index,
-                    );
-                  },
+                  submissions: stories,
+                  height: 238,
+                  onStoryTap: (index) => _openStory(stories[index]),
                 ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _HomeLoading extends StatelessWidget {
+  const _HomeLoading();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Scaffold(
+      key: Key('homeLoading'),
+      body: Center(child: CircularProgressIndicator()),
+    );
+  }
+}
+
+class _HomeError extends StatelessWidget {
+  const _HomeError({required this.message, required this.onRetry});
+
+  final String? message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      key: const Key('homeError'),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_off_rounded, size: 48),
+              const SizedBox(height: 14),
+              Text(message ?? '미션을 불러오지 못했어요.'),
+              const SizedBox(height: 16),
+              FilledButton(onPressed: onRetry, child: const Text('다시 시도')),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeHeader extends StatelessWidget {
+  const _HomeHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const DoitLogo(fontSize: 31),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            '오늘도 한 번 해볼까요?',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.end,
+            style: Theme.of(context).textTheme.labelLarge,
+          ),
+        ),
+        const SizedBox(width: 10),
+        CircleAvatar(
+          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
+          child: const Icon(Icons.person_rounded),
+        ),
+      ],
+    );
+  }
+}
+
+class _PreviewNotice extends StatelessWidget {
+  const _PreviewNotice();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const Key('previewModeNotice'),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFF4D8),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: const Row(
+        children: [
+          Icon(Icons.science_outlined, size: 20),
+          SizedBox(width: 9),
+          Expanded(
+            child: Text(
+              '로컬 MVP 미리보기 · 앱을 닫으면 미션 데이터가 초기화돼요.',
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -349,17 +335,16 @@ class _GlobalMissionBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colorScheme = Theme.of(context).colorScheme;
-
+    final colors = Theme.of(context).colorScheme;
     return Material(
-      color: colorScheme.primaryContainer,
-      borderRadius: BorderRadius.circular(24),
+      color: colors.primary,
+      borderRadius: BorderRadius.circular(28),
       clipBehavior: Clip.antiAlias,
       child: InkWell(
         key: const Key('globalMissionButton'),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 20),
+          padding: const EdgeInsets.all(22),
           child: Row(
             children: [
               Expanded(
@@ -367,35 +352,99 @@ class _GlobalMissionBanner extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Global Missions',
+                      'GLOBAL MISSION ROOM',
                       style: TextStyle(
-                        color: colorScheme.onPrimaryContainer,
-                        fontSize: 20,
+                        color: colors.onPrimary.withValues(alpha: 0.72),
+                        fontSize: 11,
                         fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
                       ),
                     ),
-                    const SizedBox(height: 6),
+                    const SizedBox(height: 8),
                     Text(
-                      '모두와 같은 미션에 도전하기',
-                      style: TextStyle(
-                        color: colorScheme.onPrimaryContainer.withValues(
-                          alpha: 0.72,
-                        ),
-                      ),
+                      '모두와 오늘의 미션 도전하기',
+                      style: Theme.of(
+                        context,
+                      ).textTheme.titleLarge?.copyWith(color: colors.onPrimary),
                     ),
                   ],
                 ),
               ),
-              const Text('📷', style: TextStyle(fontSize: 30)),
-              const SizedBox(width: 7),
-              Icon(
-                Icons.arrow_forward_rounded,
-                color: colorScheme.onPrimaryContainer,
-              ),
+              Icon(Icons.public_rounded, color: colors.onPrimary, size: 38),
+              const SizedBox(width: 8),
+              Icon(Icons.arrow_forward_rounded, color: colors.onPrimary),
             ],
           ),
         ),
       ),
+    );
+  }
+}
+
+class _QuickAction extends StatelessWidget {
+  const _QuickAction({
+    required this.buttonKey,
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.primary = false,
+  });
+
+  final Key buttonKey;
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+  final bool primary;
+
+  @override
+  Widget build(BuildContext context) {
+    return primary
+        ? FilledButton.icon(
+            key: buttonKey,
+            onPressed: onTap,
+            icon: Icon(icon),
+            label: Text(label),
+          )
+        : OutlinedButton.icon(
+            key: buttonKey,
+            onPressed: onTap,
+            icon: Icon(icon),
+            label: Text(label),
+          );
+  }
+}
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.title, required this.count});
+
+  final String title;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            title,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primaryContainer,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Text(
+            '$count',
+            style: const TextStyle(fontWeight: FontWeight.w900),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -409,50 +458,33 @@ class _RoomTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SizedBox(
-      width: 82,
-      child: Material(
-        color: Colors.transparent,
+      width: 126,
+      child: Card(
         child: InkWell(
           key: Key('roomTile_${room.code}'),
           onTap: onTap,
-          borderRadius: BorderRadius.circular(22),
-          child: Column(
-            children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: BoxDecoration(
-                  color: const Color(0xFFE3E1E8),
-                  borderRadius: BorderRadius.circular(22),
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(
+                  Icons.groups_rounded,
+                  color: Theme.of(context).colorScheme.primary,
                 ),
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    Text(room.emoji, style: const TextStyle(fontSize: 30)),
-                    if (room.isLocked)
-                      const Positioned(
-                        top: 8,
-                        right: 8,
-                        child: Icon(
-                          Icons.lock_rounded,
-                          size: 14,
-                          color: Colors.black45,
-                        ),
-                      ),
-                  ],
+                const Spacer(),
+                Text(
+                  room.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w800),
                 ),
-              ),
-              const SizedBox(height: 7),
-              Text(
-                room.name,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w700,
+                Text(
+                  '${room.memberCount}명',
+                  style: const TextStyle(fontSize: 11),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -460,49 +492,26 @@ class _RoomTile extends StatelessWidget {
   }
 }
 
-class _CreateRoomTile extends StatelessWidget {
-  const _CreateRoomTile({required this.onTap});
+class _EmptyRooms extends StatelessWidget {
+  const _EmptyRooms({required this.onCreate});
 
-  final VoidCallback onTap;
+  final VoidCallback onCreate;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 82,
-      child: Column(
-        children: [
-          Material(
-            color: Colors.white,
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(22),
-              side: const BorderSide(color: Color(0xFFD8D5E2)),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: InkWell(
-              onTap: onTap,
-              child: const SizedBox(
-                width: 72,
-                height: 72,
-                child: Icon(Icons.add_rounded, size: 29),
-              ),
-            ),
-          ),
-          const SizedBox(height: 7),
-          const Text(
-            '새 방',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-          ),
-        ],
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(22),
+        child: Column(
+          children: [
+            const Text('아직 참여 중인 방이 없어요.'),
+            const SizedBox(height: 12),
+            FilledButton(onPressed: onCreate, child: const Text('첫 방 만들기')),
+          ],
+        ),
       ),
     );
   }
-}
-
-class _CreateRoomResult {
-  const _CreateRoomResult({required this.name, this.password});
-
-  final String name;
-  final String? password;
 }
 
 class _CreateRoomDialog extends StatefulWidget {
@@ -514,25 +523,17 @@ class _CreateRoomDialog extends StatefulWidget {
 
 class _CreateRoomDialogState extends State<_CreateRoomDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _nameController = TextEditingController();
-  final _passwordController = TextEditingController();
-  bool _usePassword = false;
+  final _controller = TextEditingController();
 
   @override
   void dispose() {
-    _nameController.dispose();
-    _passwordController.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    Navigator.of(context).pop(
-      _CreateRoomResult(
-        name: _nameController.text.trim(),
-        password: _usePassword ? _passwordController.text : null,
-      ),
-    );
+    Navigator.of(context).pop(_controller.text.trim());
   }
 
   @override
@@ -541,53 +542,15 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
       title: const Text('새 방 만들기'),
       content: Form(
         key: _formKey,
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextFormField(
-                key: const Key('roomNameField'),
-                controller: _nameController,
-                autofocus: true,
-                maxLength: 20,
-                decoration: const InputDecoration(
-                  labelText: '방 이름',
-                  hintText: '예: 주말 탐험대',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return '방 이름을 입력해주세요.';
-                  }
-                  return null;
-                },
-              ),
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('비밀번호 설정'),
-                subtitle: const Text('초대받은 친구만 들어올 수 있어요.'),
-                value: _usePassword,
-                onChanged: (value) => setState(() => _usePassword = value),
-              ),
-              if (_usePassword)
-                TextFormField(
-                  key: const Key('roomPasswordField'),
-                  controller: _passwordController,
-                  obscureText: true,
-                  maxLength: 12,
-                  decoration: const InputDecoration(
-                    labelText: '비밀번호',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (value) {
-                    if (_usePassword && (value == null || value.length < 4)) {
-                      return '비밀번호는 4자 이상 입력해주세요.';
-                    }
-                    return null;
-                  },
-                ),
-            ],
-          ),
+        child: TextFormField(
+          key: const Key('roomNameField'),
+          controller: _controller,
+          autofocus: true,
+          maxLength: LocalMissionRepository.maxRoomNameLength,
+          decoration: const InputDecoration(labelText: '방 이름'),
+          validator: (value) =>
+              value == null || value.trim().isEmpty ? '방 이름을 입력해주세요.' : null,
+          onFieldSubmitted: (_) => _submit(),
         ),
       ),
       actions: [
@@ -605,13 +568,6 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
   }
 }
 
-class _JoinRoomResult {
-  const _JoinRoomResult({required this.code, required this.password});
-
-  final String code;
-  final String password;
-}
-
 class _JoinRoomDialog extends StatefulWidget {
   const _JoinRoomDialog();
 
@@ -621,24 +577,17 @@ class _JoinRoomDialog extends StatefulWidget {
 
 class _JoinRoomDialogState extends State<_JoinRoomDialog> {
   final _formKey = GlobalKey<FormState>();
-  final _codeController = TextEditingController();
-  final _passwordController = TextEditingController();
+  final _controller = TextEditingController();
 
   @override
   void dispose() {
-    _codeController.dispose();
-    _passwordController.dispose();
+    _controller.dispose();
     super.dispose();
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    Navigator.of(context).pop(
-      _JoinRoomResult(
-        code: _codeController.text.trim(),
-        password: _passwordController.text,
-      ),
-    );
+    Navigator.of(context).pop(_controller.text.trim());
   }
 
   @override
@@ -647,38 +596,16 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
       title: const Text('코드로 참여'),
       content: Form(
         key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextFormField(
-              key: const Key('roomCodeField'),
-              controller: _codeController,
-              autofocus: true,
-              textCapitalization: TextCapitalization.characters,
-              maxLength: 6,
-              decoration: const InputDecoration(
-                labelText: '6자리 방 코드',
-                hintText: 'ABC123',
-                border: OutlineInputBorder(),
-              ),
-              validator: (value) {
-                if (value == null || value.trim().length != 6) {
-                  return '방 코드 6자리를 입력해주세요.';
-                }
-                return null;
-              },
-            ),
-            const SizedBox(height: 8),
-            TextFormField(
-              key: const Key('joinPasswordField'),
-              controller: _passwordController,
-              obscureText: true,
-              decoration: const InputDecoration(
-                labelText: '비밀번호 (있는 경우)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
+        child: TextFormField(
+          key: const Key('roomCodeField'),
+          controller: _controller,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          maxLength: 12,
+          decoration: const InputDecoration(hintText: '예: NIGHT7'),
+          validator: (value) =>
+              value == null || value.trim().isEmpty ? '초대 코드를 입력해주세요.' : null,
+          onFieldSubmitted: (_) => _submit(),
         ),
       ),
       actions: [
