@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/foundation.dart';
 
 import '../models/mission_data.dart';
@@ -15,6 +17,7 @@ class LocalMissionRepository extends ChangeNotifier {
   LocalMissionRepository({
     this.previewUserId = 'preview-user',
     this.previewUserName = '나',
+    this.includePreviewData = true,
   });
 
   static const maxRoomNameLength = 40;
@@ -24,6 +27,8 @@ class LocalMissionRepository extends ChangeNotifier {
 
   final String previewUserId;
   final String previewUserName;
+  final bool includePreviewData;
+  final Random _secureRandom = Random.secure();
 
   final List<MissionRoom> _rooms = [];
   final List<MissionSubmission> _submissions = [];
@@ -32,8 +37,6 @@ class LocalMissionRepository extends ChangeNotifier {
 
   RepositoryStatus _status = RepositoryStatus.idle;
   String? _errorMessage;
-  int _nextId = 1000;
-  int _nextRoomCode = 100;
 
   RepositoryStatus get status => _status;
   String? get errorMessage => _errorMessage;
@@ -73,7 +76,11 @@ class LocalMissionRepository extends ChangeNotifier {
     notifyListeners();
 
     try {
-      _seedPreviewData();
+      if (includePreviewData) {
+        _seedPreviewData();
+      } else {
+        _seedEmptyProductData();
+      }
       _status = RepositoryStatus.ready;
     } catch (_) {
       _clearData();
@@ -162,6 +169,43 @@ class LocalMissionRepository extends ChangeNotifier {
     );
     notifyListeners();
     return JoinRoomResult.joined;
+  }
+
+  MissionRoom importJoinedRoom({
+    required String id,
+    required String name,
+    required String code,
+    required int memberCount,
+  }) {
+    _requireReady();
+    final existingIndex = _rooms.indexWhere((room) => room.id == id);
+    if (existingIndex != -1) {
+      final existing = _rooms[existingIndex];
+      _rooms[existingIndex] = MissionRoom(
+        id: existing.id,
+        name: existing.name,
+        kind: MissionRoomKind.private,
+        code: existing.code ?? code,
+        isJoined: true,
+        memberCount: memberCount,
+        missions: existing.missions,
+      );
+      notifyListeners();
+      return _rooms[existingIndex];
+    }
+
+    final room = MissionRoom(
+      id: id,
+      name: _requiredText(name, '방 이름', maxRoomNameLength),
+      kind: MissionRoomKind.private,
+      code: code,
+      isJoined: true,
+      memberCount: memberCount,
+      missions: const [],
+    );
+    _rooms.insert(0, room);
+    notifyListeners();
+    return room;
   }
 
   Mission createGlobalMission(String title) {
@@ -286,12 +330,23 @@ class LocalMissionRepository extends ChangeNotifier {
     return clean;
   }
 
-  String _id(String prefix) => '$prefix-${_nextId++}';
+  String _id(String prefix) {
+    const hex = '0123456789abcdef';
+    final entropy = List.generate(
+      16,
+      (_) => hex[_secureRandom.nextInt(hex.length)],
+    ).join();
+    return '$prefix-${DateTime.now().microsecondsSinceEpoch}-$entropy';
+  }
 
   String _roomCode() {
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     String code;
     do {
-      code = 'RM${(_nextRoomCode++).toString().padLeft(4, '0')}';
+      code = List.generate(
+        6,
+        (_) => alphabet[_secureRandom.nextInt(alphabet.length)],
+      ).join();
     } while (_rooms.any((room) => room.code == code));
     return code;
   }
@@ -471,5 +526,19 @@ class LocalMissionRepository extends ChangeNotifier {
         createdAt: now.subtract(const Duration(minutes: 40)),
       ),
     ]);
+  }
+
+  void _seedEmptyProductData() {
+    _clearData();
+    _rooms.add(
+      MissionRoom(
+        id: 'room-global',
+        name: 'Global Mission Room',
+        kind: MissionRoomKind.global,
+        isJoined: true,
+        memberCount: 0,
+        missions: const [],
+      ),
+    );
   }
 }

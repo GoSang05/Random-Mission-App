@@ -1,21 +1,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../data/chat_repository.dart';
 import '../data/local_mission_repository.dart';
+import '../models/chat_data.dart';
 import '../models/mission_data.dart';
 import '../widgets/story_card_stack.dart';
 import 'capture_screen.dart';
+import 'conversation_screen.dart';
 import 'mission_feed_screen.dart';
 
 class RoomDetailScreen extends StatefulWidget {
   const RoomDetailScreen({
     required this.repository,
     required this.roomId,
+    this.chatRepository,
     super.key,
   });
 
   final LocalMissionRepository repository;
   final String roomId;
+  final ChatRepository? chatRepository;
 
   @override
   State<RoomDetailScreen> createState() => _RoomDetailScreenState();
@@ -23,6 +28,8 @@ class RoomDetailScreen extends StatefulWidget {
 
 class _RoomDetailScreenState extends State<RoomDetailScreen> {
   final _messageController = TextEditingController();
+  Future<String>? _remoteConversation;
+  var _isSendingRemoteMessage = false;
 
   @override
   void dispose() {
@@ -70,15 +77,44 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
     );
   }
 
-  void _sendMessage() {
+  Future<void> _sendMessage() async {
     final text = _messageController.text;
     if (text.trim().isEmpty) return;
+    final chatRepository = widget.chatRepository;
+    if (chatRepository != null) {
+      if (_isSendingRemoteMessage) return;
+      setState(() => _isSendingRemoteMessage = true);
+      try {
+        final conversationId = await _remoteConversation;
+        if (conversationId == null) {
+          throw const ChatRepositoryException('방 채팅을 준비하지 못했어요.');
+        }
+        await chatRepository.sendMessage(conversationId, text);
+        _messageController.clear();
+      } on ChatRepositoryException catch (error) {
+        _message(error.message);
+      } finally {
+        if (mounted) setState(() => _isSendingRemoteMessage = false);
+      }
+      return;
+    }
     try {
       widget.repository.sendMessage(widget.roomId, text);
       _messageController.clear();
     } on ArgumentError catch (error) {
       _message(error.message.toString());
     }
+  }
+
+  Future<void> _showRemoteMessageActions(RemoteChatMessage message) async {
+    final chatRepository = widget.chatRepository;
+    if (chatRepository == null) return;
+    final blocked = await showChatMessageActions(
+      context,
+      repository: chatRepository,
+      message: message,
+    );
+    if (blocked && mounted) setState(() {});
   }
 
   void _showSettings(MissionRoom room) {
@@ -124,6 +160,12 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
         }
         final submissions = widget.repository.submissionsForRoom(room.id);
         final messages = widget.repository.messagesForRoom(room.id);
+        final chatRepository = widget.chatRepository;
+        final remoteConversation = chatRepository == null
+            ? null
+            : _remoteConversation ??= chatRepository.ensureRoomConversation(
+                room,
+              );
 
         return Scaffold(
           appBar: AppBar(
@@ -176,28 +218,50 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                                 _openStory(submissions, index),
                           ),
                           const SizedBox(height: 26),
-                          _SectionHeader(
-                            title: 'Room Chat',
-                            count: messages.length,
-                          ),
-                          const SizedBox(height: 12),
-                          if (messages.isEmpty)
-                            const _EmptyCard(text: '첫 메시지를 남겨보세요.')
-                          else
-                            for (final message in messages)
-                              _MessageBubble(
-                                message: message,
-                                isMine:
-                                    message.senderUserId ==
-                                    widget.repository.previewUserId,
-                              ),
+                          if (chatRepository != null &&
+                              remoteConversation != null)
+                            _RemoteRoomMessages(
+                              repository: chatRepository,
+                              conversation: remoteConversation,
+                              onRetry: () {
+                                setState(() {
+                                  _remoteConversation = chatRepository
+                                      .ensureRoomConversation(room);
+                                });
+                              },
+                              onMessageActions: _showRemoteMessageActions,
+                            )
+                          else ...[
+                            _SectionHeader(
+                              title: 'Room Chat',
+                              count: messages.length,
+                            ),
+                            const SizedBox(height: 12),
+                            if (messages.isEmpty)
+                              const _EmptyCard(text: '첫 메시지를 남겨보세요.')
+                            else
+                              for (final message in messages)
+                                _MessageBubble(
+                                  message: message,
+                                  isMine:
+                                      message.senderUserId ==
+                                      widget.repository.previewUserId,
+                                ),
+                          ],
                         ],
                       ),
                     ),
-                    _ChatComposer(
-                      controller: _messageController,
-                      onSend: _sendMessage,
-                    ),
+                    if (chatRepository == null)
+                      _ChatComposer(
+                        controller: _messageController,
+                        onSend: _sendMessage,
+                      )
+                    else
+                      ChatComposer(
+                        controller: _messageController,
+                        isSending: _isSendingRemoteMessage,
+                        onSend: _sendMessage,
+                      ),
                   ],
                 ),
               ),
@@ -205,6 +269,94 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
           ),
         );
       },
+    );
+  }
+}
+
+class _RemoteRoomMessages extends StatelessWidget {
+  const _RemoteRoomMessages({
+    required this.repository,
+    required this.conversation,
+    required this.onRetry,
+    required this.onMessageActions,
+  });
+
+  final ChatRepository repository;
+  final Future<String> conversation;
+  final VoidCallback onRetry;
+  final Future<void> Function(RemoteChatMessage) onMessageActions;
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: conversation,
+      builder: (context, conversationSnapshot) {
+        if (conversationSnapshot.connectionState != ConnectionState.done) {
+          return const Padding(
+            padding: EdgeInsets.all(24),
+            child: Center(child: CircularProgressIndicator()),
+          );
+        }
+        if (conversationSnapshot.hasError || !conversationSnapshot.hasData) {
+          return _RoomChatError(onRetry: onRetry);
+        }
+        return StreamBuilder<List<RemoteChatMessage>>(
+          stream: repository.watchMessages(conversationSnapshot.data!),
+          builder: (context, messageSnapshot) {
+            if (messageSnapshot.hasError) {
+              return _RoomChatError(onRetry: onRetry);
+            }
+            if (!messageSnapshot.hasData) {
+              return const Padding(
+                padding: EdgeInsets.all(24),
+                child: Center(child: CircularProgressIndicator()),
+              );
+            }
+            final messages = messageSnapshot.data!;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _SectionHeader(title: 'Room Chat', count: messages.length),
+                const SizedBox(height: 12),
+                if (messages.isEmpty)
+                  const _EmptyCard(text: '첫 메시지를 남겨보세요.')
+                else
+                  for (final message in messages)
+                    ChatMessageBubble(
+                      message: message,
+                      isMine: message.senderUserId == repository.currentUserId,
+                      onLongPress:
+                          message.senderUserId == repository.currentUserId
+                          ? null
+                          : () => onMessageActions(message),
+                    ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _RoomChatError extends StatelessWidget {
+  const _RoomChatError({required this.onRetry});
+
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          children: [
+            const Text('방 채팅을 불러오지 못했어요.'),
+            const SizedBox(height: 8),
+            TextButton(onPressed: onRetry, child: const Text('다시 시도')),
+          ],
+        ),
+      ),
     );
   }
 }

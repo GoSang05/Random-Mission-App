@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../data/chat_repository.dart';
 import '../data/local_mission_repository.dart';
 import '../models/mission_data.dart';
 import '../theme/app_theme.dart';
@@ -10,9 +11,10 @@ import 'mission_feed_screen.dart';
 import 'room_detail_screen.dart';
 
 class RoomsScreen extends StatefulWidget {
-  const RoomsScreen({required this.repository, super.key});
+  const RoomsScreen({required this.repository, this.chatRepository, super.key});
 
   final LocalMissionRepository repository;
+  final ChatRepository? chatRepository;
 
   @override
   State<RoomsScreen> createState() => _RoomsScreenState();
@@ -38,9 +40,15 @@ class _RoomsScreenState extends State<RoomsScreen> {
 
     try {
       final room = widget.repository.createRoom(name);
+      final chatRepository = widget.chatRepository;
+      if (chatRepository != null) {
+        await chatRepository.ensureRoomConversation(room);
+      }
       _message('${room.name} 방을 만들었어요. 초대 코드: ${room.code}');
     } on ArgumentError catch (error) {
       _message(error.message.toString());
+    } on ChatRepositoryException catch (error) {
+      _message('${error.message} 방을 열면 다시 연결을 시도해요.');
     }
   }
 
@@ -51,20 +59,48 @@ class _RoomsScreenState extends State<RoomsScreen> {
     );
     if (code == null || !mounted) return;
 
-    final result = widget.repository.joinRoom(code);
-    _message(switch (result) {
-      JoinRoomResult.joined => '방에 참여했어요!',
-      JoinRoomResult.alreadyJoined => '이미 참여 중인 방이에요.',
-      JoinRoomResult.invalidCode => '영문과 숫자로 된 코드를 확인해주세요.',
-      JoinRoomResult.roomNotFound => '일치하는 방을 찾지 못했어요.',
-    });
+    final localResult = widget.repository.joinRoom(code);
+    final chatRepository = widget.chatRepository;
+    if (chatRepository == null) {
+      _message(switch (localResult) {
+        JoinRoomResult.joined => '방에 참여했어요!',
+        JoinRoomResult.alreadyJoined => '이미 참여 중인 방이에요.',
+        JoinRoomResult.invalidCode => '영문과 숫자로 된 코드를 확인해주세요.',
+        JoinRoomResult.roomNotFound => '일치하는 방을 찾지 못했어요.',
+      });
+      return;
+    }
+
+    if (localResult == JoinRoomResult.invalidCode) {
+      _message('영문과 숫자로 된 코드를 확인해주세요.');
+      return;
+    }
+    try {
+      final joined = await chatRepository.joinRoomByCode(code);
+      widget.repository.importJoinedRoom(
+        id: joined.roomId,
+        name: joined.roomName,
+        code: joined.inviteCode,
+        memberCount: joined.memberCount,
+      );
+      _message(
+        localResult == JoinRoomResult.alreadyJoined
+            ? '이미 참여 중인 방이에요.'
+            : '방에 참여했어요!',
+      );
+    } on ChatRepositoryException catch (error) {
+      _message(error.message);
+    }
   }
 
   void _openRoom(MissionRoom room) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            RoomDetailScreen(repository: widget.repository, roomId: room.id),
+        builder: (_) => RoomDetailScreen(
+          repository: widget.repository,
+          chatRepository: widget.chatRepository,
+          roomId: room.id,
+        ),
       ),
     );
   }

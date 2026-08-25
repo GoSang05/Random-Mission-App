@@ -5,6 +5,7 @@
 class SupabaseConfig {
   const SupabaseConfig._();
 
-  static const url = 'https://gmlmwgssstecioogixsw.supabase.co';
-  static const publishableKey = 'sb_publishable_7CWlXwM2et45j7yvk3ArUw_eqWEVoQw';
+  static const url = 'https://vdwtyvitlxyhumtgmuuz.supabase.co';
+  static const publishableKey =
+      'sb_publishable_yh9Y05vcgrvKG9wz8FruGw_Mb2oFYZl';
 }
