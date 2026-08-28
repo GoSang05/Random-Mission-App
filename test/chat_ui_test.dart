@@ -7,6 +7,7 @@ import 'package:random_mission_app/data/local_mission_repository.dart';
 import 'package:random_mission_app/models/chat_data.dart';
 import 'package:random_mission_app/models/mission_data.dart';
 import 'package:random_mission_app/screens/chats_screen.dart';
+import 'package:random_mission_app/screens/global_missions_screen.dart';
 import 'package:random_mission_app/screens/room_detail_screen.dart';
 
 class _FakeChatRepository implements ChatRepository {
@@ -152,12 +153,9 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.scrollUntilVisible(
-      find.text('Room Chat'),
-      400,
-      scrollable: find.byType(Scrollable).first,
-    );
-    expect(find.text('Room Chat'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('roomChatButton')));
+    await tester.pumpAndSettle();
+    expect(find.text('친구들의 랜덤 미션 채팅'), findsOneWidget);
     await tester.enterText(
       find.byKey(const Key('remoteChatMessageField')),
       '방 채팅 테스트',
@@ -165,5 +163,30 @@ void main() {
     await tester.tap(find.byKey(const Key('remoteSendChatButton')));
     await tester.pumpAndSettle();
     expect(find.text('방 채팅 테스트'), findsOneWidget);
+  });
+
+  testWidgets('global mission room opens the global conversation', (
+    tester,
+  ) async {
+    final missionRepository = LocalMissionRepository();
+    final chatRepository = _FakeChatRepository();
+    addTearDown(missionRepository.dispose);
+    addTearDown(chatRepository.dispose);
+    await missionRepository.initialize();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: GlobalMissionsScreen(
+          repository: missionRepository,
+          chatRepository: chatRepository,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('globalRoomChatButton')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Global Chat'), findsOneWidget);
+    expect(find.byKey(const Key('remoteChatMessageField')), findsOneWidget);
   });
 }

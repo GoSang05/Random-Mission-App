@@ -1,38 +1,36 @@
 import 'package:flutter/material.dart';
 
 import '../data/local_mission_repository.dart';
+import '../data/local_media_store.dart';
+import '../data/chat_repository.dart';
+import '../models/chat_data.dart';
 import '../models/mission_data.dart';
+import '../utils/app_snackbar.dart';
 import '../widgets/doit_logo.dart';
 import '../widgets/story_card_stack.dart';
 import 'capture_screen.dart';
+import 'conversation_screen.dart';
+import 'local_room_chat_screen.dart';
 import 'mission_feed_screen.dart';
 
 class GlobalMissionsScreen extends StatefulWidget {
-  const GlobalMissionsScreen({required this.repository, super.key});
+  const GlobalMissionsScreen({
+    required this.repository,
+    this.chatRepository,
+    super.key,
+  });
 
   final LocalMissionRepository repository;
+  final ChatRepository? chatRepository;
 
   @override
   State<GlobalMissionsScreen> createState() => _GlobalMissionsScreenState();
 }
 
 class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
+  final LocalMediaStore _mediaStore = LocalMediaStore();
   void _message(String text) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
-  }
-
-  Future<void> _createMission() async {
-    final title = await showDialog<String>(
-      context: context,
-      builder: (_) => const _CreateMissionDialog(),
-    );
-    if (title == null || !mounted) return;
-    try {
-      widget.repository.createGlobalMission(title);
-      _message('새 글로벌 미션을 등록했어요.');
-    } on ArgumentError catch (error) {
-      _message(error.message.toString());
-    }
+    showAppSnackBar(context, text);
   }
 
   Future<void> _openCapture(MissionRoom room, Mission mission) async {
@@ -41,15 +39,17 @@ class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
         builder: (_) => CaptureScreen(
           missionTitle: mission.title,
           onSave: (result, onProgress) async {
-            // ponytail: staged local progress; use Storage progress after backend approval.
             onProgress(0.2);
-            await Future<void>.delayed(const Duration(milliseconds: 120));
+            final savedPath = await _mediaStore.persist(
+              sourcePath: result.path,
+              kind: MissionMediaKind.photo,
+            );
             onProgress(0.7);
             widget.repository.addSubmission(
               roomId: room.id,
               missionId: mission.id,
-              localPath: result.path,
-              mediaKind: result.kind,
+              localPath: savedPath,
+              mediaKind: MissionMediaKind.photo,
             );
             onProgress(1);
           },
@@ -57,6 +57,42 @@ class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
       ),
     );
     if (saved == true && mounted) _message('글로벌 스토리에 인증을 저장했어요.');
+  }
+
+  Future<void> _openGlobalChat() async {
+    final repository = widget.chatRepository;
+    if (repository == null) {
+      final room = widget.repository.globalRoom;
+      if (room == null) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => LocalRoomChatScreen(
+            repository: widget.repository,
+            roomId: room.id,
+            title: 'Global Chat',
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      final conversationId = await repository.globalConversationId();
+      if (!mounted) return;
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => ConversationScreen(
+            repository: repository,
+            conversation: ChatConversation(
+              id: conversationId,
+              kind: ChatConversationKind.global,
+              title: 'Global Chat',
+            ),
+          ),
+        ),
+      );
+    } on ChatRepositoryException catch (error) {
+      _message(error.message);
+    }
   }
 
   void _openStory(MissionRoom room, List<MissionSubmission> posts, int index) {
@@ -83,7 +119,17 @@ class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
         final roomSubmissions = widget.repository.submissionsForRoom(room.id);
 
         return Scaffold(
-          appBar: AppBar(title: const DoitLogo(fontSize: 24)),
+          appBar: AppBar(
+            title: const DoitLogo(fontSize: 24),
+            actions: [
+              IconButton(
+                key: const Key('globalRoomChatButton'),
+                tooltip: '글로벌 채팅',
+                onPressed: _openGlobalChat,
+                icon: const Icon(Icons.chat_bubble_outline_rounded),
+              ),
+            ],
+          ),
           body: SafeArea(
             child: Center(
               child: ConstrainedBox(
@@ -91,33 +137,19 @@ class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
                 child: ListView(
                   padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
                   children: [
-                    Row(
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'Global Mission Room',
-                                style: Theme.of(
-                                  context,
-                                ).textTheme.headlineSmall,
-                              ),
-                              const SizedBox(height: 5),
-                              Text('${room.memberCount}명이 함께 도전 중이에요.'),
-                            ],
-                          ),
+                        Text(
+                          'Global Mission Room',
+                          style: Theme.of(context).textTheme.headlineSmall,
                         ),
-                        FilledButton.icon(
-                          key: const Key('createGlobalMissionButton'),
-                          onPressed: _createMission,
-                          icon: const Icon(Icons.add_rounded),
-                          label: const Text('미션 만들기'),
-                        ),
+                        const SizedBox(height: 5),
+                        Text('${room.memberCount}명이 함께 도전 중이에요.'),
                       ],
                     ),
                     const SizedBox(height: 18),
-                    const _AiMissionNotice(),
+                    const _DailyMissionNotice(),
                     const SizedBox(height: 20),
                     if (room.missions.isEmpty)
                       const _EmptyGlobalMissions()
@@ -160,13 +192,13 @@ class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
   }
 }
 
-class _AiMissionNotice extends StatelessWidget {
-  const _AiMissionNotice();
+class _DailyMissionNotice extends StatelessWidget {
+  const _DailyMissionNotice();
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      key: const Key('futureAiMissionNotice'),
+      key: const Key('dailyMissionNotice'),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: const Color(0xFF24212B),
@@ -174,11 +206,11 @@ class _AiMissionNotice extends StatelessWidget {
       ),
       child: const Row(
         children: [
-          Icon(Icons.auto_awesome_rounded, color: Color(0xFFFFD580)),
+          Icon(Icons.today_rounded, color: Color(0xFFFFD580)),
           SizedBox(width: 12),
           Expanded(
             child: Text(
-              'AI 미션 추천은 제공업체와 보안 방식이 승인된 뒤 연결됩니다.',
+              '모든 사용자에게 같은 미션이 표시되며 매일 자동으로 바뀌어요.',
               style: TextStyle(
                 color: Colors.white,
                 fontWeight: FontWeight.w700,
@@ -289,62 +321,8 @@ class _EmptyGlobalMissions extends StatelessWidget {
     return const Card(
       child: Padding(
         padding: EdgeInsets.all(24),
-        child: Center(child: Text('아직 공개 미션이 없어요. 첫 미션을 만들어보세요.')),
+        child: Center(child: Text('오늘 표시할 미션이 없어요.')),
       ),
-    );
-  }
-}
-
-class _CreateMissionDialog extends StatefulWidget {
-  const _CreateMissionDialog();
-
-  @override
-  State<_CreateMissionDialog> createState() => _CreateMissionDialogState();
-}
-
-class _CreateMissionDialogState extends State<_CreateMissionDialog> {
-  final _formKey = GlobalKey<FormState>();
-  final _controller = TextEditingController();
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _submit() {
-    if (!_formKey.currentState!.validate()) return;
-    Navigator.of(context).pop(_controller.text.trim());
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('글로벌 미션 만들기'),
-      content: Form(
-        key: _formKey,
-        child: TextFormField(
-          key: const Key('globalMissionTitleField'),
-          controller: _controller,
-          autofocus: true,
-          maxLength: LocalMissionRepository.maxMissionTitleLength,
-          maxLines: 3,
-          decoration: const InputDecoration(hintText: '예: 오늘 가장 재미있는 간판 찍기'),
-          validator: (value) =>
-              value == null || value.trim().isEmpty ? '미션 내용을 입력해주세요.' : null,
-        ),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          key: const Key('confirmGlobalMissionButton'),
-          onPressed: _submit,
-          child: const Text('등록하기'),
-        ),
-      ],
     );
   }
 }

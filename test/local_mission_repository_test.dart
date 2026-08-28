@@ -63,4 +63,57 @@ void main() {
     expect(imported.isJoined, isTrue);
     expect(repository.joinedRooms.single.id, 'shared-room-id');
   });
+
+  test('같은 날짜와 방은 같은 미션을 받고 다음 날에는 교체된다', () async {
+    final dayOne = DateTime.utc(2026, 8, 28, 3);
+    final first = LocalMissionRepository(
+      includePreviewData: false,
+      now: () => dayOne,
+    );
+    final second = LocalMissionRepository(
+      includePreviewData: false,
+      now: () => dayOne,
+    );
+    await first.initialize();
+    await second.initialize();
+    addTearDown(first.dispose);
+    addTearDown(second.dispose);
+
+    expect(
+      first.globalRoom!.missions.map((mission) => mission.title),
+      second.globalRoom!.missions.map((mission) => mission.title),
+    );
+
+    final nextDay = LocalMissionRepository(
+      includePreviewData: false,
+      now: () => dayOne.add(const Duration(days: 1)),
+    );
+    await nextDay.initialize();
+    addTearDown(nextDay.dispose);
+    expect(
+      nextDay.globalRoom!.missions.map((mission) => mission.id).toList(),
+      isNot(
+        equals(
+          first.globalRoom!.missions.map((mission) => mission.id).toList(),
+        ),
+      ),
+    );
+  });
+
+  test('사진 외 업로드는 거부하고 비밀 방은 비밀번호를 확인한다', () async {
+    final repository = LocalMissionRepository(includePreviewData: false);
+    await repository.initialize();
+    addTearDown(repository.dispose);
+    final room = repository.createRoom('비밀 방', password: '4321');
+    expect(room.isLocked, isTrue);
+    expect(
+      () => repository.addSubmission(
+        roomId: room.id,
+        missionId: room.missions.first.id,
+        localPath: '/tmp/video.mp4',
+        mediaKind: MissionMediaKind.video,
+      ),
+      throwsArgumentError,
+    );
+  });
 }

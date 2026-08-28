@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../data/chat_repository.dart';
 import '../models/chat_data.dart';
 import 'conversation_screen.dart';
+import '../utils/app_snackbar.dart';
 
 class ChatsScreen extends StatefulWidget {
   const ChatsScreen({
@@ -32,9 +33,7 @@ class _ChatsScreenState extends State<ChatsScreen> {
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showAppSnackBar(context, message);
   }
 
   Future<void> _openGlobalChat() async {

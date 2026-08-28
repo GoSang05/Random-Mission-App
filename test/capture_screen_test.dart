@@ -32,14 +32,14 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const Key('captureShutterButton')));
+    expect(find.byKey(const Key('videoModeButton')), findsNothing);
+    await tester.tap(find.byKey(const Key('cameraCaptureButton')));
     await tester.pumpAndSettle();
 
+    expect(find.text('촬영하지 못했어요. 다시 시도해주세요.'), findsOneWidget);
     expect(
-      find.byKey(const Key('captureState_permissionDenied')),
+      find.byKey(const Key('retryCameraPermissionButton')),
       findsOneWidget,
     );
-    expect(find.byKey(const Key('retryCaptureButton')), findsOneWidget);
-    expect(find.byKey(const Key('cancelCaptureButton')), findsOneWidget);
   });
 }

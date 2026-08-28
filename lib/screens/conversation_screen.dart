@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/chat_repository.dart';
 import '../models/chat_data.dart';
+import '../utils/app_snackbar.dart';
 
 class ConversationScreen extends StatefulWidget {
   const ConversationScreen({
@@ -30,9 +31,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    showAppSnackBar(context, message);
   }
 
   Future<void> _sendMessage() async {
@@ -279,9 +278,7 @@ Future<bool> showChatMessageActions(
     if (action == 'report') {
       await repository.reportMessage(message.id);
       if (context.mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('메시지를 신고했어요.')));
+        showAppSnackBar(context, '메시지를 신고했어요.');
       }
       return false;
     }
@@ -306,16 +303,12 @@ Future<bool> showChatMessageActions(
     if (confirmed != true) return false;
     await repository.blockUser(message.senderUserId);
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('사용자를 차단했어요.')));
+      showAppSnackBar(context, '사용자를 차단했어요.');
     }
     return true;
   } on ChatRepositoryException catch (error) {
     if (context.mounted) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      showAppSnackBar(context, error.message);
     }
     return false;
   }

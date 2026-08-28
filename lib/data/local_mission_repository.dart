@@ -1,12 +1,21 @@
+import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
 
 import '../models/mission_data.dart';
+import 'default_missions.dart';
+import 'local_mission_store.dart';
 
 enum RepositoryStatus { idle, loading, ready, error }
 
-enum JoinRoomResult { joined, alreadyJoined, invalidCode, roomNotFound }
+enum JoinRoomResult {
+  joined,
+  alreadyJoined,
+  invalidCode,
+  wrongPassword,
+  roomNotFound,
+}
 
 /// In-memory data for the non-production MVP preview.
 ///
@@ -18,22 +27,27 @@ class LocalMissionRepository extends ChangeNotifier {
     this.previewUserId = 'preview-user',
     this.previewUserName = '나',
     this.includePreviewData = true,
-  });
+    this.store,
+    DateTime Function()? now,
+  }) : _now = now ?? DateTime.now;
 
   static const maxRoomNameLength = 40;
-  static const maxMissionTitleLength = 120;
   static const maxMessageLength = 500;
   static const maxLocalPathLength = 2048;
 
   final String previewUserId;
-  final String previewUserName;
+  String previewUserName;
   final bool includePreviewData;
+  final LocalMissionStore? store;
+  final DateTime Function() _now;
   final Random _secureRandom = Random.secure();
 
   final List<MissionRoom> _rooms = [];
   final List<MissionSubmission> _submissions = [];
   final List<ChatMessage> _messages = [];
   final Map<String, Map<String, VoteChoice>> _votesBySubmission = {};
+  Future<void> _writeQueue = Future<void>.value();
+  String? _missionDateKey;
 
   RepositoryStatus _status = RepositoryStatus.idle;
   String? _errorMessage;
@@ -41,6 +55,18 @@ class LocalMissionRepository extends ChangeNotifier {
   RepositoryStatus get status => _status;
   String? get errorMessage => _errorMessage;
   bool get isLoading => _status == RepositoryStatus.loading;
+
+  Future<void> persistPendingChanges() => _writeQueue;
+
+  void refreshDailyMissionsIfNeeded() {
+    if (_status != RepositoryStatus.ready ||
+        _missionDateKey == _dateKey(_now())) {
+      return;
+    }
+    _refreshDailyMissions();
+    notifyListeners();
+    _persist();
+  }
 
   List<MissionRoom> get joinedRooms => List.unmodifiable(
     _rooms.where(
@@ -59,7 +85,12 @@ class LocalMissionRepository extends ChangeNotifier {
     final joinedIds = joinedRooms.map((room) => room.id).toSet();
     final recent =
         _submissions
-            .where((submission) => joinedIds.contains(submission.roomId))
+            .where(
+              (submission) =>
+                  joinedIds.contains(submission.roomId) &&
+                  _isCurrentDay(submission.createdAt) &&
+                  submission.mediaKind == MissionMediaKind.photo,
+            )
             .toList()
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return List.unmodifiable(recent.take(10));
@@ -76,12 +107,17 @@ class LocalMissionRepository extends ChangeNotifier {
     notifyListeners();
 
     try {
-      if (includePreviewData) {
+      final saved = await store?.load();
+      if (saved != null) {
+        _restore(saved);
+      } else if (includePreviewData) {
         _seedPreviewData();
       } else {
         _seedEmptyProductData();
       }
+      _refreshDailyMissions();
       _status = RepositoryStatus.ready;
+      _persist();
     } catch (_) {
       _clearData();
       _errorMessage = '미리보기 데이터를 불러오지 못했어요.';
@@ -111,7 +147,30 @@ class LocalMissionRepository extends ChangeNotifier {
   List<MissionSubmission> submissionsForRoom(String roomId) {
     if (roomById(roomId) == null) return const [];
     final submissions =
-        _submissions.where((submission) => submission.roomId == roomId).toList()
+        _submissions
+            .where(
+              (submission) =>
+                  submission.roomId == roomId &&
+                  submission.mediaKind == MissionMediaKind.photo &&
+                  _isCurrentDay(submission.createdAt),
+            )
+            .toList()
+          ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    return List.unmodifiable(submissions);
+  }
+
+  List<MissionSubmission> submissionHistoryForRoom(String roomId) {
+    final room = roomById(roomId);
+    if (room == null || room.isGlobal) return const [];
+    final submissions =
+        _submissions
+            .where(
+              (submission) =>
+                  submission.roomId == roomId &&
+                  submission.mediaKind == MissionMediaKind.photo &&
+                  !_isCurrentDay(submission.createdAt),
+            )
+            .toList()
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
     return List.unmodifiable(submissions);
   }
@@ -124,31 +183,33 @@ class LocalMissionRepository extends ChangeNotifier {
     return List.unmodifiable(messages);
   }
 
-  MissionRoom createRoom(String name) {
+  MissionRoom createRoom(String name, {String? password}) {
     _requireReady();
     final cleanName = _requiredText(name, '방 이름', maxRoomNameLength);
-    final now = DateTime.now();
-    final mission = Mission(
-      id: _id('mission'),
-      title: '오늘 가장 웃긴 순간을 찍어보세요',
-      createdAt: now,
-      createdByUserId: previewUserId,
-    );
+    final cleanPassword = password?.trim();
+    if (cleanPassword != null && cleanPassword.length > 40) {
+      throw ArgumentError('비밀번호는 40자 이하여야 해요.');
+    }
+    final code = _roomCode();
     final room = MissionRoom(
       id: _id('room'),
       name: cleanName,
       kind: MissionRoomKind.private,
-      code: _roomCode(),
+      code: code,
+      password: cleanPassword == null || cleanPassword.isEmpty
+          ? null
+          : cleanPassword,
       isJoined: true,
       memberCount: 1,
-      missions: [mission],
+      missions: _dailyMissions(code),
     );
     _rooms.insert(0, room);
     notifyListeners();
+    _persist();
     return room;
   }
 
-  JoinRoomResult joinRoom(String code) {
+  JoinRoomResult joinRoom(String code, {String? password}) {
     _requireReady();
     final cleanCode = code.trim().toUpperCase();
     if (cleanCode.isEmpty ||
@@ -162,12 +223,16 @@ class LocalMissionRepository extends ChangeNotifier {
     );
     if (index == -1) return JoinRoomResult.roomNotFound;
     if (_rooms[index].isJoined) return JoinRoomResult.alreadyJoined;
+    if (_rooms[index].isLocked && _rooms[index].password != password?.trim()) {
+      return JoinRoomResult.wrongPassword;
+    }
 
     _rooms[index] = _rooms[index].copyWith(
       isJoined: true,
       memberCount: _rooms[index].memberCount + 1,
     );
     notifyListeners();
+    _persist();
     return JoinRoomResult.joined;
   }
 
@@ -186,11 +251,13 @@ class LocalMissionRepository extends ChangeNotifier {
         name: existing.name,
         kind: MissionRoomKind.private,
         code: existing.code ?? code,
+        password: existing.password,
         isJoined: true,
         memberCount: memberCount,
-        missions: existing.missions,
+        missions: _dailyMissions(existing.code ?? code),
       );
       notifyListeners();
+      _persist();
       return _rooms[existingIndex];
     }
 
@@ -201,31 +268,12 @@ class LocalMissionRepository extends ChangeNotifier {
       code: code,
       isJoined: true,
       memberCount: memberCount,
-      missions: const [],
+      missions: _dailyMissions(code),
     );
     _rooms.insert(0, room);
     notifyListeners();
+    _persist();
     return room;
-  }
-
-  Mission createGlobalMission(String title) {
-    _requireReady();
-    final cleanTitle = _requiredText(title, '미션', maxMissionTitleLength);
-    final roomIndex = _rooms.indexWhere(
-      (room) => room.kind == MissionRoomKind.global,
-    );
-    if (roomIndex == -1) throw StateError('Global room is unavailable.');
-
-    final mission = Mission(
-      id: _id('mission'),
-      title: cleanTitle,
-      createdAt: DateTime.now(),
-      createdByUserId: previewUserId,
-    );
-    final room = _rooms[roomIndex];
-    _rooms[roomIndex] = room.copyWith(missions: [...room.missions, mission]);
-    notifyListeners();
-    return mission;
   }
 
   MissionSubmission addSubmission({
@@ -235,6 +283,9 @@ class LocalMissionRepository extends ChangeNotifier {
     required MissionMediaKind mediaKind,
   }) {
     _requireReady();
+    if (mediaKind != MissionMediaKind.photo) {
+      throw ArgumentError('사진만 업로드할 수 있어요.');
+    }
     final cleanPath = _requiredText(localPath, '미디어 경로', maxLocalPathLength);
     final room = _accessibleRoom(roomId);
     if (missionById(room.id, missionId) == null) {
@@ -249,11 +300,12 @@ class LocalMissionRepository extends ChangeNotifier {
       authorName: previewUserName,
       localPath: cleanPath,
       mediaKind: mediaKind,
-      createdAt: DateTime.now(),
+      createdAt: _now(),
     );
     _submissions.insert(0, submission);
     _votesBySubmission[submission.id] = {};
     notifyListeners();
+    _persist();
     return submission;
   }
 
@@ -277,6 +329,7 @@ class LocalMissionRepository extends ChangeNotifier {
     votes[previewUserId] = choice;
     _syncVotes(submissionId);
     notifyListeners();
+    _persist();
     return true;
   }
 
@@ -290,11 +343,17 @@ class LocalMissionRepository extends ChangeNotifier {
       senderUserId: previewUserId,
       senderName: previewUserName,
       text: cleanText,
-      createdAt: DateTime.now(),
+      createdAt: _now(),
     );
     _messages.add(message);
     notifyListeners();
+    _persist();
     return message;
+  }
+
+  void updatePreviewUserName(String value) {
+    previewUserName = _requiredText(value, '닉네임', 40);
+    notifyListeners();
   }
 
   MissionRoom _accessibleRoom(String roomId) {
@@ -351,6 +410,53 @@ class LocalMissionRepository extends ChangeNotifier {
     return code;
   }
 
+  void _refreshDailyMissions() {
+    for (var index = 0; index < _rooms.length; index++) {
+      final room = _rooms[index];
+      final scope = room.isGlobal ? 'global' : (room.code ?? room.id);
+      _rooms[index] = room.copyWith(missions: _dailyMissions(scope));
+    }
+    _missionDateKey = _dateKey(_now());
+  }
+
+  List<Mission> _dailyMissions(String scope) {
+    if (missionPool.isEmpty) return const [];
+    final date = _dateKey(_now());
+    final indexes = List<int>.generate(missionPool.length, (index) => index);
+    indexes.shuffle(Random(_stableSeed('$scope|$date')));
+    final count = min(dailyMissionCount, indexes.length);
+    return List.generate(count, (position) {
+      final poolIndex = indexes[position];
+      return Mission(
+        id: 'daily-$scope-$date-$poolIndex',
+        title: missionPool[poolIndex],
+        createdAt: _koreaTime(_now()),
+        createdByUserId: 'system-daily',
+      );
+    });
+  }
+
+  int _stableSeed(String value) {
+    var hash = 0x811C9DC5;
+    for (final unit in value.codeUnits) {
+      hash ^= unit;
+      hash = (hash * 0x01000193) & 0x7fffffff;
+    }
+    return hash;
+  }
+
+  DateTime _koreaTime(DateTime value) =>
+      value.toUtc().add(const Duration(hours: 9));
+
+  String _dateKey(DateTime value) {
+    final korea = _koreaTime(value);
+    return '${korea.year.toString().padLeft(4, '0')}'
+        '${korea.month.toString().padLeft(2, '0')}'
+        '${korea.day.toString().padLeft(2, '0')}';
+  }
+
+  bool _isCurrentDay(DateTime value) => _dateKey(value) == _dateKey(_now());
+
   void _syncVotes(String submissionId) {
     final index = _submissions.indexWhere(
       (submission) => submission.id == submissionId,
@@ -393,9 +499,40 @@ class LocalMissionRepository extends ChangeNotifier {
     _votesBySubmission.clear();
   }
 
+  void _restore(LocalMissionSnapshot snapshot) {
+    _clearData();
+    _rooms.addAll(snapshot.rooms);
+    _submissions.addAll(
+      snapshot.submissions.where(
+        (submission) => submission.mediaKind == MissionMediaKind.photo,
+      ),
+    );
+    _messages.addAll(snapshot.messages);
+    for (final entry in snapshot.votesBySubmission.entries) {
+      _votesBySubmission[entry.key] = Map<String, VoteChoice>.from(entry.value);
+    }
+  }
+
+  void _persist() {
+    final destination = store;
+    if (destination == null) return;
+    final snapshot = LocalMissionSnapshot(
+      rooms: List<MissionRoom>.from(_rooms),
+      submissions: List<MissionSubmission>.from(_submissions),
+      messages: List<ChatMessage>.from(_messages),
+      votesBySubmission: _votesBySubmission.map(
+        (key, value) => MapEntry(key, Map<String, VoteChoice>.from(value)),
+      ),
+    );
+    _writeQueue = _writeQueue
+        .then((_) => destination.save(snapshot))
+        .catchError((Object _) {});
+    unawaited(_writeQueue);
+  }
+
   void _seedPreviewData() {
     _clearData();
-    final now = DateTime.now();
+    final now = _now();
     final friendsMission = Mission(
       id: 'mission-private-red',
       title: '빨간색 물건 5개를 한 장에 찍기',
@@ -467,7 +604,7 @@ class LocalMissionRepository extends ChangeNotifier {
         authorUserId: 'seed-user-minji',
         authorName: '민지',
         mediaKind: MissionMediaKind.photo,
-        createdAt: now.subtract(const Duration(minutes: 35)),
+        createdAt: now,
       ),
       MissionSubmission(
         id: 'submission-campus-jun',
@@ -475,8 +612,8 @@ class LocalMissionRepository extends ChangeNotifier {
         missionId: campusMission.id,
         authorUserId: 'seed-user-jun',
         authorName: '준',
-        mediaKind: MissionMediaKind.video,
-        createdAt: now.subtract(const Duration(minutes: 52)),
+        mediaKind: MissionMediaKind.photo,
+        createdAt: now,
       ),
       MissionSubmission(
         id: 'submission-global-sora',
@@ -485,7 +622,7 @@ class LocalMissionRepository extends ChangeNotifier {
         authorUserId: 'seed-user-sora',
         authorName: '소라',
         mediaKind: MissionMediaKind.photo,
-        createdAt: now.subtract(const Duration(minutes: 18)),
+        createdAt: now,
       ),
       MissionSubmission(
         id: 'submission-global-doyun',
@@ -494,7 +631,7 @@ class LocalMissionRepository extends ChangeNotifier {
         authorUserId: 'seed-user-doyun',
         authorName: '도윤',
         mediaKind: MissionMediaKind.photo,
-        createdAt: now.subtract(const Duration(minutes: 29)),
+        createdAt: now,
       ),
     ]);
 
@@ -537,7 +674,7 @@ class LocalMissionRepository extends ChangeNotifier {
         kind: MissionRoomKind.global,
         isJoined: true,
         memberCount: 0,
-        missions: const [],
+        missions: _dailyMissions('global'),
       ),
     );
   }

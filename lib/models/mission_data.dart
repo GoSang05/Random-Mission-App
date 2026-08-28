@@ -27,28 +27,33 @@ class MissionRoom {
     required this.memberCount,
     required List<Mission> missions,
     this.code,
+    this.password,
   }) : missions = List.unmodifiable(missions);
 
   final String id;
   final String name;
   final MissionRoomKind kind;
   final String? code;
+  final String? password;
   final bool isJoined;
   final int memberCount;
   final List<Mission> missions;
 
   bool get isGlobal => kind == MissionRoomKind.global;
+  bool get isLocked => password != null && password!.isNotEmpty;
 
   MissionRoom copyWith({
     bool? isJoined,
     int? memberCount,
     List<Mission>? missions,
+    String? password,
   }) {
     return MissionRoom(
       id: id,
       name: name,
       kind: kind,
       code: code,
+      password: password ?? this.password,
       isJoined: isJoined ?? this.isJoined,
       memberCount: memberCount ?? this.memberCount,
       missions: missions ?? this.missions,

@@ -1,45 +1,109 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+
+import 'dart:async';
+import 'dart:io';
 
 import '../data/chat_repository.dart';
 import '../data/local_mission_repository.dart';
+import '../data/local_media_store.dart';
+import '../data/local_profile_store.dart';
 import '../models/mission_data.dart';
-import '../theme/app_theme.dart';
+import '../utils/app_snackbar.dart';
 import '../widgets/doit_logo.dart';
-import '../widgets/story_card_stack.dart';
+import '../widgets/mission_photo.dart';
+import '../widgets/playful_illustrations.dart';
 import 'global_missions_screen.dart';
 import 'mission_feed_screen.dart';
 import 'room_detail_screen.dart';
 
 class RoomsScreen extends StatefulWidget {
-  const RoomsScreen({required this.repository, this.chatRepository, super.key});
+  const RoomsScreen({
+    required this.repository,
+    this.chatRepository,
+    this.displayName = '나',
+    this.isGuest = false,
+    this.onSignOut,
+    this.profileStorageScope = 'preview',
+    super.key,
+  });
 
   final LocalMissionRepository repository;
   final ChatRepository? chatRepository;
+  final String displayName;
+  final bool isGuest;
+  final Future<void> Function()? onSignOut;
+  final String profileStorageScope;
 
   @override
   State<RoomsScreen> createState() => _RoomsScreenState();
 }
 
 class _RoomsScreenState extends State<RoomsScreen> {
+  late String _displayName = widget.displayName;
+  String? _avatarPath;
+  late final LocalProfileStore _profileStore = LocalProfileStore(
+    widget.profileStorageScope,
+  );
+  final LocalMediaStore _mediaStore = LocalMediaStore();
+  Timer? _dailyRefreshTimer;
+
   @override
   void initState() {
     super.initState();
     widget.repository.initialize();
+    _loadProfile();
+    _scheduleDailyRefresh();
+  }
+
+  void _scheduleDailyRefresh() {
+    _dailyRefreshTimer?.cancel();
+    final utcNow = DateTime.now().toUtc();
+    final koreaNow = utcNow.add(const Duration(hours: 9));
+    final nextKoreaMidnight = DateTime.utc(
+      koreaNow.year,
+      koreaNow.month,
+      koreaNow.day + 1,
+    );
+    final nextUtc = nextKoreaMidnight.subtract(const Duration(hours: 9));
+    _dailyRefreshTimer = Timer(nextUtc.difference(utcNow), () {
+      widget.repository.refreshDailyMissionsIfNeeded();
+      _scheduleDailyRefresh();
+    });
+  }
+
+  @override
+  void dispose() {
+    _dailyRefreshTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _loadProfile() async {
+    final profile = await _profileStore.load();
+    if (profile == null || !mounted) return;
+    widget.repository.updatePreviewUserName(profile.displayName);
+    setState(() {
+      _displayName = profile.displayName;
+      _avatarPath = profile.avatarPath;
+    });
   }
 
   void _message(String text) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+    showAppSnackBar(context, text);
   }
 
   Future<void> _createRoom() async {
-    final name = await showDialog<String>(
+    final input = await showDialog<_CreateRoomInput>(
       context: context,
       builder: (_) => const _CreateRoomDialog(),
     );
-    if (name == null || !mounted) return;
+    if (input == null || !mounted) return;
 
     try {
-      final room = widget.repository.createRoom(name);
+      final room = widget.repository.createRoom(
+        input.name,
+        password: input.password,
+      );
       final chatRepository = widget.chatRepository;
       if (chatRepository != null) {
         await chatRepository.ensureRoomConversation(room);
@@ -53,26 +117,36 @@ class _RoomsScreenState extends State<RoomsScreen> {
   }
 
   Future<void> _joinRoom() async {
-    final code = await showDialog<String>(
+    final input = await showDialog<_JoinRoomInput>(
       context: context,
       builder: (_) => const _JoinRoomDialog(),
     );
-    if (code == null || !mounted) return;
+    if (input == null || !mounted) return;
 
-    final localResult = widget.repository.joinRoom(code);
+    final code = input.code;
+    final localResult = widget.repository.joinRoom(
+      code,
+      password: input.password,
+    );
     final chatRepository = widget.chatRepository;
     if (chatRepository == null) {
       _message(switch (localResult) {
         JoinRoomResult.joined => '방에 참여했어요!',
         JoinRoomResult.alreadyJoined => '이미 참여 중인 방이에요.',
         JoinRoomResult.invalidCode => '영문과 숫자로 된 코드를 확인해주세요.',
+        JoinRoomResult.wrongPassword => '방 비밀번호가 일치하지 않아요.',
         JoinRoomResult.roomNotFound => '일치하는 방을 찾지 못했어요.',
       });
       return;
     }
 
-    if (localResult == JoinRoomResult.invalidCode) {
-      _message('영문과 숫자로 된 코드를 확인해주세요.');
+    if (localResult == JoinRoomResult.invalidCode ||
+        localResult == JoinRoomResult.wrongPassword) {
+      _message(
+        localResult == JoinRoomResult.wrongPassword
+            ? '방 비밀번호가 일치하지 않아요.'
+            : '영문과 숫자로 된 코드를 확인해주세요.',
+      );
       return;
     }
     try {
@@ -122,10 +196,114 @@ class _RoomsScreenState extends State<RoomsScreen> {
   void _openGlobalRoom() {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => GlobalMissionsScreen(repository: widget.repository),
+        builder: (_) => GlobalMissionsScreen(
+          repository: widget.repository,
+          chatRepository: widget.chatRepository,
+        ),
       ),
     );
   }
+
+  Future<void> _showProfileSettings() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text('설정', style: Theme.of(context).textTheme.headlineSmall),
+              const SizedBox(height: 18),
+              ListTile(
+                key: const Key('profileIdentityTile'),
+                contentPadding: EdgeInsets.zero,
+                leading: _ProfileAvatar(path: _avatarPath),
+                title: Text(_displayName),
+                subtitle: Text(widget.isGuest ? 'Guest 모드' : '로그인 계정'),
+                trailing: const Icon(Icons.edit_rounded),
+                onTap: () => _editNickname(sheetContext),
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.add_a_photo_outlined),
+                title: const Text('프로필 사진 변경'),
+                onTap: () => _changeProfilePhoto(sheetContext),
+              ),
+              if (widget.onSignOut != null) ...[
+                const SizedBox(height: 12),
+                FilledButton.tonalIcon(
+                  key: const Key('profileSignOutButton'),
+                  onPressed: () async {
+                    Navigator.of(sheetContext).pop();
+                    await widget.onSignOut!();
+                  },
+                  icon: const Icon(Icons.logout_rounded),
+                  label: const Text('로그아웃'),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editNickname(BuildContext sheetContext) async {
+    final controller = TextEditingController(text: _displayName);
+    final value = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('닉네임 변경'),
+        content: TextField(
+          key: const Key('profileNicknameField'),
+          controller: controller,
+          autofocus: true,
+          maxLength: 40,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('취소'),
+          ),
+          FilledButton(
+            key: const Key('saveProfileNicknameButton'),
+            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
+            child: const Text('저장'),
+          ),
+        ],
+      ),
+    );
+    if (value == null || value.isEmpty || !mounted) return;
+    widget.repository.updatePreviewUserName(value);
+    setState(() => _displayName = value);
+    await _saveProfile();
+    if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+  }
+
+  Future<void> _changeProfilePhoto(BuildContext sheetContext) async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1024,
+      maxHeight: 1024,
+      imageQuality: 85,
+    );
+    if (picked == null || !mounted) return;
+    final path = await _mediaStore.persist(
+      sourcePath: picked.path,
+      kind: MissionMediaKind.photo,
+    );
+    if (!mounted) return;
+    setState(() => _avatarPath = path);
+    await _saveProfile();
+    if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+  }
+
+  Future<void> _saveProfile() => _profileStore.save(
+    LocalProfile(displayName: _displayName, avatarPath: _avatarPath),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -151,78 +329,89 @@ class _RoomsScreenState extends State<RoomsScreen> {
 
     return Scaffold(
       key: const ValueKey('rooms'),
+      backgroundColor: playfulCream,
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppSpacing.page,
-                18,
-                AppSpacing.page,
-                40,
-              ),
-              children: [
-                const _HomeHeader(),
-                const SizedBox(height: 16),
-                const _PreviewNotice(),
-                const SizedBox(height: 16),
-                _GlobalMissionBanner(onTap: _openGlobalRoom),
-                const SizedBox(height: 14),
-                Row(
-                  children: [
-                    Expanded(
-                      child: _QuickAction(
+        child: CustomPaint(
+          painter: const PlayfulDotBackground(),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 760),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 42),
+                children: [
+                  _HomeHeader(
+                    onProfileTap: _showProfileSettings,
+                    avatarPath: _avatarPath,
+                  ),
+                  const SizedBox(height: 18),
+                  _GlobalMissionBanner(onTap: _openGlobalRoom),
+                  const SizedBox(height: 14),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final join = _QuickAction(
                         buttonKey: const Key('joinRoomButton'),
                         icon: Icons.key_rounded,
                         label: '코드로 참여',
                         onTap: _joinRoom,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: _QuickAction(
+                      );
+                      final create = _QuickAction(
                         buttonKey: const Key('createRoomButton'),
                         icon: Icons.add_rounded,
                         label: '새 방 만들기',
                         primary: true,
                         onTap: _createRoom,
+                      );
+                      if (constraints.maxWidth < 340) {
+                        return Column(
+                          children: [join, const SizedBox(height: 12), create],
+                        );
+                      }
+                      return Row(
+                        children: [
+                          Expanded(child: join),
+                          const SizedBox(width: 12),
+                          Expanded(child: create),
+                        ],
+                      );
+                    },
+                  ),
+                  const SizedBox(height: 28),
+                  _SectionTitle(title: 'My Rooms', count: rooms.length),
+                  const SizedBox(height: 12),
+                  if (rooms.isEmpty)
+                    _EmptyRooms(onCreate: _createRoom)
+                  else
+                    SizedBox(
+                      height: 184,
+                      child: ListView.separated(
+                        key: const Key('roomsList'),
+                        scrollDirection: Axis.horizontal,
+                        itemCount: rooms.length,
+                        clipBehavior: Clip.none,
+                        separatorBuilder: (_, _) => const SizedBox(width: 14),
+                        itemBuilder: (_, index) {
+                          final room = rooms[index];
+                          return _RoomTile(
+                            room: room,
+                            variant: index,
+                            onTap: () => _openRoom(room),
+                          );
+                        },
                       ),
                     ),
-                  ],
-                ),
-                const SizedBox(height: 30),
-                _SectionTitle(title: 'My Rooms', count: rooms.length),
-                const SizedBox(height: 14),
-                if (rooms.isEmpty)
-                  _EmptyRooms(onCreate: _createRoom)
-                else
-                  SizedBox(
-                    height: 116,
-                    child: ListView.separated(
-                      key: const Key('roomsList'),
-                      scrollDirection: Axis.horizontal,
-                      itemCount: rooms.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 12),
-                      itemBuilder: (_, index) {
-                        final room = rooms[index];
-                        return _RoomTile(
-                          room: room,
-                          onTap: () => _openRoom(room),
-                        );
-                      },
-                    ),
+                  const SizedBox(height: 28),
+                  _SectionTitle(
+                    title: 'Friends Stories',
+                    count: stories.length,
                   ),
-                const SizedBox(height: 30),
-                _SectionTitle(title: 'Friends Stories', count: stories.length),
-                const SizedBox(height: 12),
-                StoryCardStack(
-                  key: const Key('homeStories'),
-                  submissions: stories,
-                  height: 238,
-                  onStoryTap: (index) => _openStory(stories[index]),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  _FriendsStoriesGrid(
+                    key: const Key('homeStories'),
+                    submissions: stories,
+                    onStoryTap: (index) => _openStory(stories[index]),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -273,13 +462,17 @@ class _HomeError extends StatelessWidget {
 }
 
 class _HomeHeader extends StatelessWidget {
-  const _HomeHeader();
+  const _HomeHeader({required this.onProfileTap, this.avatarPath});
+
+  final VoidCallback onProfileTap;
+  final String? avatarPath;
 
   @override
   Widget build(BuildContext context) {
     return Row(
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: [
-        const DoitLogo(fontSize: 31),
+        const _PlayfulLogo(),
         const SizedBox(width: 12),
         Expanded(
           child: Text(
@@ -287,43 +480,58 @@ class _HomeHeader extends StatelessWidget {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.end,
-            style: Theme.of(context).textTheme.labelLarge,
+            style: const TextStyle(
+              color: playfulInk,
+              fontSize: 16,
+              fontWeight: FontWeight.w900,
+              letterSpacing: -.5,
+            ),
           ),
         ),
-        const SizedBox(width: 10),
-        CircleAvatar(
-          backgroundColor: Theme.of(context).colorScheme.primaryContainer,
-          child: const Icon(Icons.person_rounded),
+        const SizedBox(width: 12),
+        Material(
+          color: const Color(0xFFEAD7FF),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: const BorderSide(color: playfulInk, width: 3),
+          ),
+          child: InkWell(
+            key: const Key('profileSettingsButton'),
+            borderRadius: BorderRadius.circular(16),
+            onTap: onProfileTap,
+            child: SizedBox.square(
+              dimension: 54,
+              child: Center(
+                child: _ProfileAvatar(path: avatarPath, radius: 15),
+              ),
+            ),
+          ),
         ),
       ],
     );
   }
 }
 
-class _PreviewNotice extends StatelessWidget {
-  const _PreviewNotice();
+class _PlayfulLogo extends StatelessWidget {
+  const _PlayfulLogo();
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      key: const Key('previewModeNotice'),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
-      decoration: BoxDecoration(
-        color: const Color(0xFFFFF4D8),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.science_outlined, size: 20),
-          SizedBox(width: 9),
-          Expanded(
-            child: Text(
-              '로컬 MVP 미리보기 · 앱을 닫으면 미션 데이터가 초기화돼요.',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700),
-            ),
-          ),
-        ],
-      ),
+    return Stack(
+      clipBehavior: Clip.none,
+      children: [
+        const DoitLogo(fontSize: 43),
+        const Positioned(
+          left: 31,
+          top: 15,
+          child: Doodle(kind: DoodleKind.star, color: playfulLime, size: 17),
+        ),
+        const Positioned(
+          right: -18,
+          bottom: 2,
+          child: Doodle(kind: DoodleKind.sparkle, size: 14),
+        ),
+      ],
     );
   }
 }
@@ -335,45 +543,104 @@ class _GlobalMissionBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Material(
-      color: colors.primary,
-      borderRadius: BorderRadius.circular(28),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        key: const Key('globalMissionButton'),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(22),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'GLOBAL MISSION ROOM',
-                      style: TextStyle(
-                        color: colors.onPrimary.withValues(alpha: 0.72),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 1,
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(30),
+        boxShadow: const [BoxShadow(color: playfulInk, offset: Offset(0, 7))],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(30),
+        clipBehavior: Clip.antiAlias,
+        child: Ink(
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Color(0xFF7658F0), Color(0xFF4939C7)],
+            ),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: playfulInk, width: 3),
+          ),
+          child: InkWell(
+            key: const Key('globalMissionButton'),
+            onTap: onTap,
+            child: SizedBox(
+              height: 164,
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  return Stack(
+                    children: [
+                      Positioned(
+                        right: -8,
+                        top: 5,
+                        bottom: -3,
+                        width: constraints.maxWidth * .48,
+                        child: const GlobalMissionIllustration(),
                       ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '모두와 오늘의 미션 도전하기',
-                      style: Theme.of(
-                        context,
-                      ).textTheme.titleLarge?.copyWith(color: colors.onPrimary),
-                    ),
-                  ],
-                ),
+                      Padding(
+                        padding: EdgeInsets.fromLTRB(
+                          constraints.maxWidth < 370 ? 20 : 26,
+                          30,
+                          constraints.maxWidth * .38,
+                          24,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'GLOBAL MISSION ROOM',
+                              style: TextStyle(
+                                color: Color(0xFFDCCFFF),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.1,
+                              ),
+                            ),
+                            const Spacer(),
+                            Text(
+                              '모두와\n오늘의 미션 도전하기',
+                              maxLines: 2,
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: constraints.maxWidth < 370 ? 21 : 24,
+                                height: 1.22,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -1.2,
+                                shadows: const [
+                                  Shadow(
+                                    color: Color(0x66000000),
+                                    offset: Offset(2, 3),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Positioned(
+                        right: 15,
+                        bottom: 14,
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          decoration: const BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.fromBorderSide(
+                              BorderSide(color: playfulInk, width: 3),
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.arrow_forward_rounded,
+                            color: playfulInk,
+                            size: 27,
+                          ),
+                        ),
+                      ),
+                    ],
+                  );
+                },
               ),
-              Icon(Icons.public_rounded, color: colors.onPrimary, size: 38),
-              const SizedBox(width: 8),
-              Icon(Icons.arrow_forward_rounded, color: colors.onPrimary),
-            ],
+            ),
           ),
         ),
       ),
@@ -398,19 +665,42 @@ class _QuickAction extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return primary
-        ? FilledButton.icon(
-            key: buttonKey,
-            onPressed: onTap,
-            icon: Icon(icon),
-            label: Text(label),
-          )
-        : OutlinedButton.icon(
-            key: buttonKey,
-            onPressed: onTap,
-            icon: Icon(icon),
-            label: Text(label),
-          );
+    return Container(
+      height: 64,
+      decoration: BoxDecoration(
+        color: primary ? playfulLime : playfulCream,
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: playfulInk, width: 3),
+        boxShadow: const [BoxShadow(color: playfulInk, offset: Offset(0, 5))],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          key: buttonKey,
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(21),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: primary ? playfulInk : playfulPurple, size: 29),
+              const SizedBox(width: 10),
+              Flexible(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: playfulInk,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -425,23 +715,53 @@ class _SectionTitle extends StatelessWidget {
     return Row(
       children: [
         Expanded(
-          child: Text(
-            title,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: Theme.of(context).textTheme.titleLarge,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: playfulInk,
+                  fontSize: 27,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: -1.2,
+                ),
+              ),
+              const SizedBox(height: 2),
+              Transform.rotate(
+                angle: -.08,
+                child: Container(
+                  margin: const EdgeInsets.only(left: 2),
+                  width: 46,
+                  height: 4,
+                  decoration: BoxDecoration(
+                    color: playfulPurple,
+                    borderRadius: BorderRadius.circular(99),
+                  ),
+                ),
+              ),
+            ],
           ),
         ),
         const SizedBox(width: 8),
         Container(
-          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+          width: 46,
+          height: 46,
+          alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primaryContainer,
-            borderRadius: BorderRadius.circular(99),
+            color: const Color(0xFFE9D8FF),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: playfulInk, width: 2.5),
           ),
           child: Text(
             '$count',
-            style: const TextStyle(fontWeight: FontWeight.w900),
+            style: const TextStyle(
+              color: playfulInk,
+              fontSize: 18,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ),
       ],
@@ -450,41 +770,107 @@ class _SectionTitle extends StatelessWidget {
 }
 
 class _RoomTile extends StatelessWidget {
-  const _RoomTile({required this.room, required this.onTap});
+  const _RoomTile({
+    required this.room,
+    required this.variant,
+    required this.onTap,
+  });
 
   final MissionRoom room;
+  final int variant;
   final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: 126,
-      child: Card(
+    return Container(
+      width: 146,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: playfulInk, width: 3),
+        boxShadow: const [BoxShadow(color: playfulInk, offset: Offset(0, 5))],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(25),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           key: Key('roomTile_${room.code}'),
           onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  Icons.groups_rounded,
-                  color: Theme.of(context).colorScheme.primary,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    RoomIllustration(variant: variant),
+                    Positioned(
+                      left: 10,
+                      top: 10,
+                      child: Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: const Color(0x33000000),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.groups_rounded,
+                          color: playfulPurple,
+                          size: 24,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const Spacer(),
-                Text(
-                  room.name,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 10, 12, 12),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            room.name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: playfulInk,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            '♙ ${room.memberCount}명',
+                            style: const TextStyle(
+                              color: playfulInk,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Doodle(
+                      kind: variant.isEven ? DoodleKind.star : DoodleKind.heart,
+                      color: variant.isEven
+                          ? const Color(0xFFFFE457)
+                          : const Color(0xFFFF8FB3),
+                      size: 24,
+                    ),
+                  ],
                 ),
-                Text(
-                  '${room.memberCount}명',
-                  style: const TextStyle(fontSize: 11),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -499,17 +885,99 @@ class _EmptyRooms extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: playfulInk, width: 3),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(22),
         child: Column(
           children: [
             const Text('아직 참여 중인 방이 없어요.'),
             const SizedBox(height: 12),
-            FilledButton(onPressed: onCreate, child: const Text('첫 방 만들기')),
+            FilledButton(
+              onPressed: onCreate,
+              style: FilledButton.styleFrom(
+                backgroundColor: playfulLime,
+                foregroundColor: playfulInk,
+              ),
+              child: const Text('첫 방 만들기'),
+            ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _FriendsStoriesGrid extends StatelessWidget {
+  const _FriendsStoriesGrid({
+    required this.submissions,
+    required this.onStoryTap,
+    super.key,
+  });
+
+  final List<MissionSubmission> submissions;
+  final ValueChanged<int> onStoryTap;
+
+  @override
+  Widget build(BuildContext context) {
+    if (submissions.isEmpty) {
+      return Container(
+        height: 126,
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: .75),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: playfulInk, width: 3),
+        ),
+        child: const Center(
+          child: Text(
+            '아직 새로운 스토리가 없어요',
+            style: TextStyle(fontWeight: FontWeight.w800),
+          ),
+        ),
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final gap = constraints.maxWidth < 360 ? 10.0 : 14.0;
+        final itemWidth = (constraints.maxWidth - gap) / 2;
+        final itemHeight = itemWidth * .76;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: List.generate(submissions.length, (index) {
+            return SizedBox(
+              width: itemWidth,
+              height: itemHeight,
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(25),
+                  border: Border.all(color: playfulInk, width: 3),
+                  boxShadow: const [
+                    BoxShadow(color: playfulInk, offset: Offset(0, 5)),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  borderRadius: BorderRadius.circular(22),
+                  clipBehavior: Clip.antiAlias,
+                  child: InkWell(
+                    key: Key('storyStackCard$index'),
+                    onTap: () => onStoryTap(index),
+                    child: MissionPhoto(
+                      submission: submissions[index],
+                      borderRadius: 0,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }),
+        );
+      },
     );
   }
 }
@@ -524,16 +992,24 @@ class _CreateRoomDialog extends StatefulWidget {
 class _CreateRoomDialogState extends State<_CreateRoomDialog> {
   final _formKey = GlobalKey<FormState>();
   final _controller = TextEditingController();
+  final _passwordController = TextEditingController();
+  bool _isPrivate = false;
 
   @override
   void dispose() {
     _controller.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    Navigator.of(context).pop(_controller.text.trim());
+    Navigator.of(context).pop(
+      _CreateRoomInput(
+        name: _controller.text.trim(),
+        password: _isPrivate ? _passwordController.text.trim() : null,
+      ),
+    );
   }
 
   @override
@@ -542,15 +1018,40 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
       title: const Text('새 방 만들기'),
       content: Form(
         key: _formKey,
-        child: TextFormField(
-          key: const Key('roomNameField'),
-          controller: _controller,
-          autofocus: true,
-          maxLength: LocalMissionRepository.maxRoomNameLength,
-          decoration: const InputDecoration(labelText: '방 이름'),
-          validator: (value) =>
-              value == null || value.trim().isEmpty ? '방 이름을 입력해주세요.' : null,
-          onFieldSubmitted: (_) => _submit(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              key: const Key('roomNameField'),
+              controller: _controller,
+              autofocus: true,
+              maxLength: LocalMissionRepository.maxRoomNameLength,
+              decoration: const InputDecoration(labelText: '방 이름'),
+              validator: (value) => value == null || value.trim().isEmpty
+                  ? '방 이름을 입력해주세요.'
+                  : null,
+            ),
+            SwitchListTile(
+              key: const Key('privateRoomSwitch'),
+              contentPadding: EdgeInsets.zero,
+              title: const Text('비밀 방'),
+              subtitle: const Text('입장할 때 비밀번호가 필요해요.'),
+              value: _isPrivate,
+              onChanged: (value) => setState(() => _isPrivate = value),
+            ),
+            if (_isPrivate)
+              TextFormField(
+                key: const Key('roomPasswordField'),
+                controller: _passwordController,
+                obscureText: true,
+                maxLength: 40,
+                decoration: const InputDecoration(labelText: '입장 비밀번호'),
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? '비밀번호를 입력해주세요.'
+                    : null,
+                onFieldSubmitted: (_) => _submit(),
+              ),
+          ],
         ),
       ),
       actions: [
@@ -578,16 +1079,23 @@ class _JoinRoomDialog extends StatefulWidget {
 class _JoinRoomDialogState extends State<_JoinRoomDialog> {
   final _formKey = GlobalKey<FormState>();
   final _controller = TextEditingController();
+  final _passwordController = TextEditingController();
 
   @override
   void dispose() {
     _controller.dispose();
+    _passwordController.dispose();
     super.dispose();
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    Navigator.of(context).pop(_controller.text.trim());
+    Navigator.of(context).pop(
+      _JoinRoomInput(
+        code: _controller.text.trim(),
+        password: _passwordController.text.trim(),
+      ),
+    );
   }
 
   @override
@@ -596,16 +1104,29 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
       title: const Text('코드로 참여'),
       content: Form(
         key: _formKey,
-        child: TextFormField(
-          key: const Key('roomCodeField'),
-          controller: _controller,
-          autofocus: true,
-          textCapitalization: TextCapitalization.characters,
-          maxLength: 12,
-          decoration: const InputDecoration(hintText: '예: NIGHT7'),
-          validator: (value) =>
-              value == null || value.trim().isEmpty ? '초대 코드를 입력해주세요.' : null,
-          onFieldSubmitted: (_) => _submit(),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextFormField(
+              key: const Key('roomCodeField'),
+              controller: _controller,
+              autofocus: true,
+              textCapitalization: TextCapitalization.characters,
+              maxLength: 12,
+              decoration: const InputDecoration(hintText: '예: NIGHT7'),
+              validator: (value) => value == null || value.trim().isEmpty
+                  ? '초대 코드를 입력해주세요.'
+                  : null,
+            ),
+            TextFormField(
+              key: const Key('joinRoomPasswordField'),
+              controller: _passwordController,
+              obscureText: true,
+              maxLength: 40,
+              decoration: const InputDecoration(labelText: '비밀번호 (비밀 방인 경우)'),
+              onFieldSubmitted: (_) => _submit(),
+            ),
+          ],
         ),
       ),
       actions: [
@@ -619,6 +1140,37 @@ class _JoinRoomDialogState extends State<_JoinRoomDialog> {
           child: const Text('참여하기'),
         ),
       ],
+    );
+  }
+}
+
+class _CreateRoomInput {
+  const _CreateRoomInput({required this.name, this.password});
+
+  final String name;
+  final String? password;
+}
+
+class _JoinRoomInput {
+  const _JoinRoomInput({required this.code, required this.password});
+
+  final String code;
+  final String password;
+}
+
+class _ProfileAvatar extends StatelessWidget {
+  const _ProfileAvatar({this.path, this.radius = 20});
+
+  final String? path;
+  final double radius;
+
+  @override
+  Widget build(BuildContext context) {
+    final path = this.path;
+    return CircleAvatar(
+      radius: radius,
+      backgroundImage: path == null ? null : FileImage(File(path)),
+      child: path == null ? const Icon(Icons.person_rounded) : null,
     );
   }
 }

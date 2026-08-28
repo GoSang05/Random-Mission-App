@@ -3,18 +3,21 @@ import 'package:flutter/material.dart';
 import '../data/local_mission_repository.dart';
 import '../models/mission_data.dart';
 import '../widgets/mission_photo.dart';
+import '../utils/app_snackbar.dart';
 
 class MissionFeedScreen extends StatefulWidget {
   const MissionFeedScreen({
     required this.repository,
     required this.roomId,
     required this.initialSubmissionId,
+    this.history = false,
     super.key,
   });
 
   final LocalMissionRepository repository;
   final String roomId;
   final String initialSubmissionId;
+  final bool history;
 
   @override
   State<MissionFeedScreen> createState() => _MissionFeedScreenState();
@@ -27,13 +30,17 @@ class _MissionFeedScreenState extends State<MissionFeedScreen> {
   @override
   void initState() {
     super.initState();
-    final submissions = widget.repository.submissionsForRoom(widget.roomId);
+    final submissions = _submissions();
     final initial = submissions.indexWhere(
       (submission) => submission.id == widget.initialSubmissionId,
     );
     _currentIndex = initial < 0 ? 0 : initial;
     _pageController = PageController(initialPage: _currentIndex);
   }
+
+  List<MissionSubmission> _submissions() => widget.history
+      ? widget.repository.submissionHistoryForRoom(widget.roomId)
+      : widget.repository.submissionsForRoom(widget.roomId);
 
   @override
   void dispose() {
@@ -44,9 +51,7 @@ class _MissionFeedScreenState extends State<MissionFeedScreen> {
   void _vote(MissionSubmission submission, VoteChoice choice) {
     final changed = widget.repository.castVote(submission.id, choice);
     if (!changed) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('이미 같은 선택으로 투표했어요.')));
+      showAppSnackBar(context, '이미 같은 선택으로 투표했어요.');
     }
   }
 
@@ -56,7 +61,7 @@ class _MissionFeedScreenState extends State<MissionFeedScreen> {
       animation: widget.repository,
       builder: (context, _) {
         final room = widget.repository.roomById(widget.roomId);
-        final submissions = widget.repository.submissionsForRoom(widget.roomId);
+        final submissions = _submissions();
         if (room == null || submissions.isEmpty) {
           return Scaffold(
             appBar: AppBar(),
