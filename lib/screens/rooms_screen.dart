@@ -189,6 +189,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
           repository: widget.repository,
           roomId: room.id,
           initialSubmissionId: submission.id,
+          allJoinedPrivateRooms: true,
         ),
       ),
     );

@@ -33,6 +33,41 @@ Future<void> openRoom(WidgetTester tester, String code) async {
 }
 
 void main() {
+  testWidgets('home stories navigate across joined private rooms', (
+    tester,
+  ) async {
+    await pumpMvp(tester);
+
+    final firstStory = find.byKey(const Key('storyStackCard0'));
+    await tester.ensureVisible(firstStory);
+    await tester.drag(find.byType(ListView).first, const Offset(0, -180));
+    await pumpUi(tester);
+    await tester.tap(firstStory);
+    await pumpUi(tester);
+
+    expect(find.text('1/2'), findsOneWidget);
+    final tapArea = find.byKey(const Key('storyTapArea'));
+    final initialRect = tester.getRect(tapArea);
+    final rightSide = Offset(initialRect.right - 12, initialRect.center.dy);
+
+    await tester.longPressAt(rightSide);
+    await pumpUi(tester);
+    expect(find.text('1/2'), findsOneWidget);
+
+    await tester.tapAt(rightSide);
+    await pumpUi(tester);
+    expect(find.text('2/2'), findsOneWidget);
+
+    final secondRect = tester.getRect(tapArea);
+    await tester.tapAt(Offset(secondRect.left + 12, secondRect.center.dy));
+    await pumpUi(tester);
+    expect(find.text('1/2'), findsOneWidget);
+
+    await tester.drag(tapArea, const Offset(-300, 0));
+    await pumpUi(tester);
+    expect(find.text('2/2'), findsOneWidget);
+  });
+
   testWidgets('프로필 설정에서 로그아웃할 수 있다', (tester) async {
     final repository = LocalMissionRepository();
     await repository.initialize();

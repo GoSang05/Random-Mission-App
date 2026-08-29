@@ -93,7 +93,7 @@ class LocalMissionRepository extends ChangeNotifier {
             )
             .toList()
           ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
-    return List.unmodifiable(recent.take(10));
+    return List.unmodifiable(recent);
   }
 
   Future<void> initialize() async {

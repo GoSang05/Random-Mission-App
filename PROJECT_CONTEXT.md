@@ -1,5 +1,13 @@
 # Random Mission App - Project Context
 
+## Unified Home Story Feed (2026-08-30)
+
+* Opening a story from the home screen uses one continuous feed containing today's photo stories from every joined private room.
+* Opening a story from inside a room or its history remains scoped to that room.
+* A horizontal swipe moves through the feed. A short tap in the left or right third of the photo moves backward or forward.
+* A recognized long press never changes the story, including when the finger is released.
+* The story viewer follows the playful warm-cream, bold black outline, purple/lime visual system used by the rest of the app.
+
 ## 1. Project Overview
 
 이 프로젝트는 친구 또는 혼자서 수행할 수 있는 랜덤 미션을 제공하고, 사용자가 사진/영상 등으로 인증하며 추억을 기록하는 모바일 소셜 앱이다.
