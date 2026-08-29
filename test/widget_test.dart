@@ -143,7 +143,7 @@ void main() {
     await tester.tap(find.byKey(const Key('globalMissionButton')));
     await pumpUi(tester);
     expect(find.text('Global Mission Room'), findsOneWidget);
-    expect(find.byKey(const Key('dailyMissionNotice')), findsOneWidget);
+    expect(find.byKey(const Key('dailyMissionNotice')), findsNothing);
     expect(find.byKey(const Key('createGlobalMissionButton')), findsNothing);
 
     final camera = find.byKey(const Key('globalCamera1'));

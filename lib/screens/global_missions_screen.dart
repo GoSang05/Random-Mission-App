@@ -7,6 +7,8 @@ import '../models/chat_data.dart';
 import '../models/mission_data.dart';
 import '../utils/app_snackbar.dart';
 import '../widgets/doit_logo.dart';
+import '../widgets/playful_illustrations.dart';
+import '../widgets/playful_ui.dart';
 import '../widgets/story_card_stack.dart';
 import 'capture_screen.dart';
 import 'conversation_screen.dart';
@@ -119,106 +121,108 @@ class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
         final roomSubmissions = widget.repository.submissionsForRoom(room.id);
 
         return Scaffold(
-          appBar: AppBar(
-            title: const DoitLogo(fontSize: 24),
-            actions: [
-              IconButton(
-                key: const Key('globalRoomChatButton'),
-                tooltip: '글로벌 채팅',
-                onPressed: _openGlobalChat,
-                icon: const Icon(Icons.chat_bubble_outline_rounded),
-              ),
-            ],
-          ),
+          backgroundColor: playfulCream,
           body: SafeArea(
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 640),
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-                  children: [
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Global Mission Room',
-                          style: Theme.of(context).textTheme.headlineSmall,
+            child: PlayfulBackground(
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 700),
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
+                        child: PlayfulHeader(
+                          title: 'DOIT',
+                          titleWidget: const DoitLogo(fontSize: 34),
+                          actions: [
+                            PlayfulIconButton(
+                              buttonKey: const Key('globalRoomChatButton'),
+                              tooltip: '글로벌 채팅',
+                              icon: Icons.chat_bubble_rounded,
+                              iconColor: playfulPurple,
+                              size: 50,
+                              onPressed: _openGlobalChat,
+                            ),
+                          ],
                         ),
-                        const SizedBox(height: 5),
-                        Text('${room.memberCount}명이 함께 도전 중이에요.'),
-                      ],
-                    ),
-                    const SizedBox(height: 18),
-                    const _DailyMissionNotice(),
-                    const SizedBox(height: 20),
-                    if (room.missions.isEmpty)
-                      const _EmptyGlobalMissions()
-                    else
-                      for (
-                        var index = 0;
-                        index < room.missions.length;
-                        index++
-                      ) ...[
-                        Builder(
-                          builder: (context) {
-                            final mission = room.missions[index];
-                            final posts = roomSubmissions
-                                .where((post) => post.missionId == mission.id)
-                                .toList();
-                            return _GlobalMissionCard(
-                              number: index + 1,
-                              mission: mission,
-                              posts: posts,
-                              isUserCreated:
-                                  mission.createdByUserId ==
-                                  widget.repository.previewUserId,
-                              onCapture: () => _openCapture(room, mission),
-                              onStoryTap: (postIndex) =>
-                                  _openStory(room, posts, postIndex),
-                            );
-                          },
+                      ),
+                      Expanded(
+                        child: ListView(
+                          padding: const EdgeInsets.fromLTRB(20, 18, 20, 42),
+                          children: [
+                            const Text(
+                              'Global Mission Room',
+                              style: TextStyle(
+                                color: playfulInk,
+                                fontSize: 30,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -1.5,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Container(
+                              width: 72,
+                              height: 4,
+                              decoration: BoxDecoration(
+                                color: playfulPurple,
+                                borderRadius: BorderRadius.circular(99),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Text(
+                              '${room.memberCount}명이 함께 도전 중이에요.',
+                              style: const TextStyle(
+                                color: playfulInk,
+                                fontSize: 15,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 22),
+                            if (room.missions.isEmpty)
+                              const _EmptyGlobalMissions()
+                            else
+                              for (
+                                var index = 0;
+                                index < room.missions.length;
+                                index++
+                              ) ...[
+                                Builder(
+                                  builder: (context) {
+                                    final mission = room.missions[index];
+                                    final posts = roomSubmissions
+                                        .where(
+                                          (post) =>
+                                              post.missionId == mission.id,
+                                        )
+                                        .toList();
+                                    return _GlobalMissionCard(
+                                      number: index + 1,
+                                      mission: mission,
+                                      posts: posts,
+                                      isUserCreated:
+                                          mission.createdByUserId ==
+                                          widget.repository.previewUserId,
+                                      onCapture: () =>
+                                          _openCapture(room, mission),
+                                      onStoryTap: (postIndex) =>
+                                          _openStory(room, posts, postIndex),
+                                    );
+                                  },
+                                ),
+                                if (index != room.missions.length - 1)
+                                  const SizedBox(height: 22),
+                              ],
+                          ],
                         ),
-                        if (index != room.missions.length - 1)
-                          const SizedBox(height: 14),
-                      ],
-                  ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),
           ),
         );
       },
-    );
-  }
-}
-
-class _DailyMissionNotice extends StatelessWidget {
-  const _DailyMissionNotice();
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      key: const Key('dailyMissionNotice'),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF24212B),
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: const Row(
-        children: [
-          Icon(Icons.today_rounded, color: Color(0xFFFFD580)),
-          SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              '모든 사용자에게 같은 미션이 표시되며 매일 자동으로 바뀌어요.',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
@@ -242,72 +246,92 @@ class _GlobalMissionCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    return Card(
-      child: Padding(
-        padding: const EdgeInsets.all(18),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  backgroundColor: colors.primaryContainer,
-                  child: Text(
-                    '$number',
-                    style: const TextStyle(fontWeight: FontWeight.w900),
+    return PlayfulPanel(
+      padding: const EdgeInsets.all(18),
+      radius: 26,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                alignment: Alignment.center,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE7D8FF),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: playfulInk, width: 2.5),
+                ),
+                child: Text(
+                  '$number',
+                  style: const TextStyle(
+                    color: playfulInk,
+                    fontSize: 19,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        isUserCreated ? 'USER MISSION' : 'TODAY\'S MISSION',
-                        style: TextStyle(
-                          color: colors.primary,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        mission.title,
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton.filledTonal(
-                  key: Key('globalCamera$number'),
-                  tooltip: '이 미션 인증하기',
-                  onPressed: onCapture,
-                  icon: const Icon(Icons.camera_alt_rounded),
-                ),
-              ],
-            ),
-            const SizedBox(height: 14),
-            const Divider(),
-            const SizedBox(height: 12),
-            Text(
-              'MISSION STORIES · ${posts.length}',
-              style: TextStyle(
-                color: colors.primary,
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 1,
               ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      isUserCreated ? 'USER MISSION' : 'TODAY\'S MISSION',
+                      style: const TextStyle(
+                        color: playfulPurple,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 1,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      mission.title,
+                      style: const TextStyle(
+                        color: playfulInk,
+                        fontSize: 18,
+                        height: 1.3,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              PlayfulIconButton(
+                buttonKey: Key('globalCamera$number'),
+                tooltip: '이 미션 인증하기',
+                fill: const Color(0xFFE4D5FF),
+                iconColor: const Color(0xFF3F3766),
+                size: 56,
+                onPressed: onCapture,
+                icon: Icons.camera_alt_rounded,
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          const Divider(color: Color(0xFF9A79EF), thickness: 2),
+          const SizedBox(height: 12),
+          Text(
+            'MISSION STORIES · ${posts.length}',
+            style: const TextStyle(
+              color: playfulPurple,
+              fontSize: 10,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 1,
             ),
-            const SizedBox(height: 8),
+          ),
+          const SizedBox(height: 8),
+          if (posts.isEmpty)
+            const _EmptyMissionStories()
+          else
             StoryCardStack(
               submissions: posts,
               height: 190,
               onStoryTap: onStoryTap,
             ),
-          ],
-        ),
+        ],
       ),
     );
   }
@@ -318,10 +342,59 @@ class _EmptyGlobalMissions extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return const Card(
+    return const PlayfulPanel(
       child: Padding(
         padding: EdgeInsets.all(24),
         child: Center(child: Text('오늘 표시할 미션이 없어요.')),
+      ),
+    );
+  }
+}
+
+class _EmptyMissionStories extends StatelessWidget {
+  const _EmptyMissionStories();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      height: 104,
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Stack(
+              clipBehavior: Clip.none,
+              children: [
+                CircleAvatar(
+                  radius: 27,
+                  backgroundColor: Color(0xFFE9DEFF),
+                  child: Icon(
+                    Icons.photo_camera_rounded,
+                    color: playfulPurple,
+                    size: 30,
+                  ),
+                ),
+                Positioned(
+                  right: -15,
+                  bottom: -4,
+                  child: Doodle(
+                    kind: DoodleKind.star,
+                    color: Color(0xFFFFE457),
+                    size: 26,
+                  ),
+                ),
+              ],
+            ),
+            SizedBox(height: 14),
+            Text(
+              '아직 올라온 스토리가 없어요.',
+              style: TextStyle(
+                color: Colors.black45,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

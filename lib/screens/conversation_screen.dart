@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import '../data/chat_repository.dart';
 import '../models/chat_data.dart';
 import '../utils/app_snackbar.dart';
+import '../widgets/playful_illustrations.dart';
+import '../widgets/playful_ui.dart';
 
 class ConversationScreen extends StatefulWidget {
   const ConversationScreen({
@@ -74,65 +76,73 @@ class _ConversationScreenState extends State<ConversationScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: Text(widget.conversation.title)),
+      backgroundColor: playfulCream,
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 640),
-            child: Column(
-              children: [
-                Expanded(
-                  child: StreamBuilder<List<RemoteChatMessage>>(
-                    stream: widget.repository.watchMessages(
-                      widget.conversation.id,
-                    ),
-                    builder: (context, snapshot) {
-                      if (snapshot.hasError) {
-                        return const _ChatStatus(
-                          icon: Icons.cloud_off_rounded,
-                          message: '메시지를 불러오지 못했어요.',
-                        );
-                      }
-                      if (!snapshot.hasData) {
-                        return const Center(child: CircularProgressIndicator());
-                      }
-                      final messages = snapshot.data!;
-                      if (messages.isEmpty) {
-                        return const _ChatStatus(
-                          icon: Icons.forum_outlined,
-                          message: '첫 메시지를 보내보세요.',
-                        );
-                      }
-                      _scrollToEnd();
-                      return ListView.builder(
-                        key: const Key('conversationMessages'),
-                        controller: _scrollController,
-                        padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
-                        itemCount: messages.length,
-                        itemBuilder: (context, index) {
-                          final message = messages[index];
-                          return ChatMessageBubble(
-                            message: message,
-                            isMine:
-                                message.senderUserId ==
-                                widget.repository.currentUserId,
-                            onLongPress:
-                                message.senderUserId ==
-                                    widget.repository.currentUserId
-                                ? null
-                                : () => _showActions(message),
-                          );
-                        },
-                      );
-                    },
+        child: PlayfulBackground(
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 700),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(18, 10, 18, 4),
+                    child: PlayfulHeader(title: widget.conversation.title),
                   ),
-                ),
-                ChatComposer(
-                  controller: _messageController,
-                  isSending: _isSending,
-                  onSend: _sendMessage,
-                ),
-              ],
+                  Expanded(
+                    child: StreamBuilder<List<RemoteChatMessage>>(
+                      stream: widget.repository.watchMessages(
+                        widget.conversation.id,
+                      ),
+                      builder: (context, snapshot) {
+                        if (snapshot.hasError) {
+                          return const _ChatStatus(
+                            icon: Icons.cloud_off_rounded,
+                            message: '메시지를 불러오지 못했어요.',
+                          );
+                        }
+                        if (!snapshot.hasData) {
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        }
+                        final messages = snapshot.data!;
+                        if (messages.isEmpty) {
+                          return const _ChatStatus(
+                            icon: Icons.forum_outlined,
+                            message: '첫 메시지를 보내보세요.',
+                          );
+                        }
+                        _scrollToEnd();
+                        return ListView.builder(
+                          key: const Key('conversationMessages'),
+                          controller: _scrollController,
+                          padding: const EdgeInsets.fromLTRB(18, 18, 18, 12),
+                          itemCount: messages.length,
+                          itemBuilder: (context, index) {
+                            final message = messages[index];
+                            return ChatMessageBubble(
+                              message: message,
+                              isMine:
+                                  message.senderUserId ==
+                                  widget.repository.currentUserId,
+                              onLongPress:
+                                  message.senderUserId ==
+                                      widget.repository.currentUserId
+                                  ? null
+                                  : () => _showActions(message),
+                            );
+                          },
+                        );
+                      },
+                    ),
+                  ),
+                  ChatComposer(
+                    controller: _messageController,
+                    isSending: _isSending,
+                    onSend: _sendMessage,
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -155,7 +165,6 @@ class ChatMessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
     return GestureDetector(
       onLongPress: onLongPress,
       child: Align(
@@ -163,10 +172,24 @@ class ChatMessageBubble extends StatelessWidget {
         child: Container(
           constraints: const BoxConstraints(maxWidth: 420),
           margin: const EdgeInsets.only(bottom: 10),
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           decoration: BoxDecoration(
-            color: isMine ? colors.primaryContainer : colors.surfaceContainer,
-            borderRadius: BorderRadius.circular(18),
+            gradient: isMine
+                ? const LinearGradient(
+                    colors: [Color(0xFFD8C4FF), Color(0xFFF0E8FF)],
+                  )
+                : null,
+            color: isMine ? null : Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(22),
+              topRight: const Radius.circular(22),
+              bottomLeft: Radius.circular(isMine ? 22 : 5),
+              bottomRight: Radius.circular(isMine ? 5 : 22),
+            ),
+            border: Border.all(color: playfulInk, width: 2.5),
+            boxShadow: const [
+              BoxShadow(color: playfulInk, offset: Offset(0, 4)),
+            ],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -175,13 +198,21 @@ class ChatMessageBubble extends StatelessWidget {
                 Text(
                   message.senderName,
                   style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w700,
+                    color: playfulPurple,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
                   ),
                 ),
                 const SizedBox(height: 3),
               ],
-              Text(message.text),
+              Text(
+                message.text,
+                style: const TextStyle(
+                  color: playfulInk,
+                  fontSize: 16,
+                  height: 1.35,
+                ),
+              ),
             ],
           ),
         ),
@@ -204,44 +235,72 @@ class ChatComposer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Material(
-      color: Theme.of(context).colorScheme.surface,
-      elevation: 8,
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 10, 10),
-          child: Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  key: const Key('remoteChatMessageField'),
-                  controller: controller,
-                  enabled: !isSending,
-                  maxLength: ChatRepository.maxMessageLength,
-                  maxLines: 4,
-                  minLines: 1,
-                  textInputAction: TextInputAction.send,
-                  onSubmitted: (_) => onSend(),
-                  decoration: const InputDecoration(
-                    hintText: '메시지 보내기',
-                    counterText: '',
+    return SafeArea(
+      top: false,
+      minimum: const EdgeInsets.fromLTRB(18, 8, 18, 14),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(14, 4, 5, 4),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: playfulPurple, width: 3),
+          boxShadow: const [BoxShadow(color: playfulInk, offset: Offset(0, 5))],
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: TextField(
+                key: const Key('remoteChatMessageField'),
+                controller: controller,
+                enabled: !isSending,
+                maxLength: ChatRepository.maxMessageLength,
+                maxLines: 4,
+                minLines: 1,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => onSend(),
+                decoration: const InputDecoration(
+                  hintText: '메시지 보내기',
+                  counterText: '',
+                  filled: false,
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                ),
+              ),
+            ),
+            Container(
+              width: 58,
+              height: 58,
+              decoration: BoxDecoration(
+                color: playfulPurple,
+                borderRadius: BorderRadius.circular(19),
+                border: Border.all(color: playfulInk, width: 2.5),
+              ),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  key: const Key('remoteSendChatButton'),
+                  onTap: isSending ? null : onSend,
+                  borderRadius: BorderRadius.circular(16),
+                  child: Center(
+                    child: isSending
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              color: Colors.white,
+                            ),
+                          )
+                        : const Icon(
+                            Icons.send_rounded,
+                            color: Colors.white,
+                            size: 31,
+                          ),
                   ),
                 ),
               ),
-              IconButton.filled(
-                key: const Key('remoteSendChatButton'),
-                tooltip: '메시지 전송',
-                onPressed: isSending ? null : onSend,
-                icon: isSending
-                    ? const SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.send_rounded),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );

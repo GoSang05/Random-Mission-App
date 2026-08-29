@@ -1175,6 +1175,7 @@ Android Emulator not running
 * Guest도 닉네임과 프로필 사진을 설정할 수 있으며 설정 화면에서만 Guest 여부를 표시한다.
 * 방 생성 시 비밀 방과 입장 비밀번호를 선택할 수 있다.
 * 카메라는 앱 내부 실시간 프리뷰와 촬영 UI를 사용한다. 앱 최초 실행과 촬영 재시도 시 권한을 요청한다.
+* 카메라 프리뷰 프레임과 촬영 결과는 원본 종횡비에 맞춰 표시하며 정사각형 강제 확대나 왜곡을 하지 않는다.
 * Snackbar는 새 메시지가 오면 이전 메시지를 즉시 교체하여 대기열이 누적되지 않게 한다.
 
 ---
@@ -1187,3 +1188,17 @@ Android Emulator not running
 * My Rooms는 가로 스크롤 카드, Friends Stories는 반응형 2열 카드로 표시한다.
 * 홈 일러스트는 외부 임시 이미지 대신 Flutter `CustomPainter` 기반 벡터 드로잉을 사용한다.
 * 홈 UI가 변경되어도 기존 방 참여/생성, 글로벌 방, 프로필, 방/스토리 진입 동작과 위젯 키는 유지한다.
+
+---
+
+# 33. Core Screen Visual Direction (2026-08-29)
+
+* 개인 방, Global Mission Room, 사진 인증, 방 채팅도 홈과 같은 playful 디자인 시스템을 사용한다.
+* 밝은 화면은 warm off-white 점 배경, 검은 outline, purple shadow와 star/cloud/sparkle doodle을 사용한다.
+* 사진 인증 화면은 dark navy 점 배경과 lavender 컨트롤을 사용한다.
+* 개인 방 미션은 outline 카드와 미션별 카메라 버튼으로 표시하고 오늘 사진은 반응형 2열로 표시한다.
+* 로컬 채팅과 Supabase 채팅은 동일한 말풍선·헤더·메시지 입력창 스타일을 사용한다.
+* 스타일 변경 시 채팅, 히스토리, 설정, 촬영, 스토리 진입과 기존 테스트 키를 유지한다.
+* Global Mission Room에는 "모든 사용자에게 같은 미션" 안내 배너를 표시하지 않는다.
+* 개인 방 히스토리·방 설정·홈 프로필 설정·닉네임 편집 팝업도 playful outlined 테마를 사용한다.
+* 매거진 화면은 별도 요청이 없는 한 이 디자인 변경 범위에 포함하지 않는다.

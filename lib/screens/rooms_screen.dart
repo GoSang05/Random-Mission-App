@@ -13,6 +13,7 @@ import '../utils/app_snackbar.dart';
 import '../widgets/doit_logo.dart';
 import '../widgets/mission_photo.dart';
 import '../widgets/playful_illustrations.dart';
+import '../widgets/playful_ui.dart';
 import 'global_missions_screen.dart';
 import 'mission_feed_screen.dart';
 import 'room_detail_screen.dart';
@@ -207,44 +208,160 @@ class _RoomsScreenState extends State<RoomsScreen> {
   Future<void> _showProfileSettings() async {
     await showModalBottomSheet<void>(
       context: context,
-      showDragHandle: true,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      barrierColor: Colors.black45,
       builder: (sheetContext) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(22, 0, 22, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('설정', style: Theme.of(context).textTheme.headlineSmall),
-              const SizedBox(height: 18),
-              ListTile(
-                key: const Key('profileIdentityTile'),
-                contentPadding: EdgeInsets.zero,
-                leading: _ProfileAvatar(path: _avatarPath),
-                title: Text(_displayName),
-                subtitle: Text(widget.isGuest ? 'Guest 모드' : '로그인 계정'),
-                trailing: const Icon(Icons.edit_rounded),
-                onTap: () => _editNickname(sheetContext),
-              ),
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.add_a_photo_outlined),
-                title: const Text('프로필 사진 변경'),
-                onTap: () => _changeProfilePhoto(sheetContext),
-              ),
-              if (widget.onSignOut != null) ...[
-                const SizedBox(height: 12),
-                FilledButton.tonalIcon(
-                  key: const Key('profileSignOutButton'),
-                  onPressed: () async {
-                    Navigator.of(sheetContext).pop();
-                    await widget.onSignOut!();
-                  },
-                  icon: const Icon(Icons.logout_rounded),
-                  label: const Text('로그아웃'),
+        minimum: const EdgeInsets.all(12),
+        child: PlayfulPanel(
+          color: playfulCream,
+          radius: 30,
+          padding: EdgeInsets.zero,
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(27),
+            child: PlayfulBackground(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        const Doodle(
+                          kind: DoodleKind.star,
+                          color: playfulLime,
+                          size: 30,
+                        ),
+                        const SizedBox(width: 10),
+                        const Expanded(
+                          child: Text(
+                            '설정',
+                            style: TextStyle(
+                              color: playfulInk,
+                              fontSize: 26,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        PlayfulIconButton(
+                          icon: Icons.close_rounded,
+                          tooltip: '닫기',
+                          size: 42,
+                          onPressed: () => Navigator.of(sheetContext).pop(),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 18),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(22),
+                        border: Border.all(color: playfulInk, width: 2.5),
+                        boxShadow: const [
+                          BoxShadow(
+                            color: Color(0xFFD4C2FF),
+                            offset: Offset(4, 5),
+                          ),
+                        ],
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(20),
+                        child: ListTile(
+                          key: const Key('profileIdentityTile'),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 7,
+                          ),
+                          leading: Container(
+                            padding: const EdgeInsets.all(3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFE5D4FF),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: playfulInk, width: 2),
+                            ),
+                            child: _ProfileAvatar(path: _avatarPath),
+                          ),
+                          title: Text(
+                            _displayName,
+                            style: const TextStyle(
+                              color: playfulInk,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          subtitle: Text(
+                            widget.isGuest ? 'Guest 모드' : '로그인 계정',
+                            style: const TextStyle(
+                              color: playfulPurple,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          trailing: const Icon(
+                            Icons.edit_rounded,
+                            color: playfulPurple,
+                          ),
+                          onTap: () => _editNickname(sheetContext),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: playfulInk, width: 2.5),
+                      ),
+                      child: Material(
+                        color: Colors.transparent,
+                        borderRadius: BorderRadius.circular(18),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 3,
+                          ),
+                          leading: const Icon(
+                            Icons.add_a_photo_rounded,
+                            color: playfulPurple,
+                            size: 29,
+                          ),
+                          title: const Text(
+                            '프로필 사진 변경',
+                            style: TextStyle(
+                              color: playfulInk,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          trailing: const Doodle(
+                            kind: DoodleKind.sparkle,
+                            color: Color(0xFFFF8FB3),
+                            size: 22,
+                          ),
+                          onTap: () => _changeProfilePhoto(sheetContext),
+                        ),
+                      ),
+                    ),
+                    if (widget.onSignOut != null) ...[
+                      const SizedBox(height: 18),
+                      FilledButton.icon(
+                        key: const Key('profileSignOutButton'),
+                        onPressed: () async {
+                          Navigator.of(sheetContext).pop();
+                          await widget.onSignOut!();
+                        },
+                        style: FilledButton.styleFrom(
+                          backgroundColor: const Color(0xFFFFD8E3),
+                          foregroundColor: playfulInk,
+                          side: const BorderSide(color: playfulInk, width: 2.5),
+                        ),
+                        icon: const Icon(Icons.logout_rounded),
+                        label: const Text('로그아웃'),
+                      ),
+                    ],
+                  ],
                 ),
-              ],
-            ],
+              ),
+            ),
           ),
         ),
       ),
@@ -255,25 +372,98 @@ class _RoomsScreenState extends State<RoomsScreen> {
     final controller = TextEditingController(text: _displayName);
     final value = await showDialog<String>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('닉네임 변경'),
-        content: TextField(
-          key: const Key('profileNicknameField'),
-          controller: controller,
-          autofocus: true,
-          maxLength: 40,
+      barrierColor: Colors.black45,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: PlayfulPanel(
+            color: playfulCream,
+            radius: 30,
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Row(
+                  children: [
+                    Doodle(
+                      kind: DoodleKind.heart,
+                      color: Color(0xFFFF8FB3),
+                      size: 29,
+                    ),
+                    SizedBox(width: 10),
+                    Text(
+                      '닉네임 변경',
+                      style: TextStyle(
+                        color: playfulInk,
+                        fontSize: 24,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                TextField(
+                  key: const Key('profileNicknameField'),
+                  controller: controller,
+                  autofocus: true,
+                  maxLength: 40,
+                  decoration: InputDecoration(
+                    hintText: '닉네임',
+                    filled: true,
+                    fillColor: Colors.white,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: const BorderSide(
+                        color: playfulInk,
+                        width: 2.5,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(18),
+                      borderSide: const BorderSide(
+                        color: playfulPurple,
+                        width: 3,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: playfulInk,
+                          side: const BorderSide(color: playfulInk, width: 2.5),
+                        ),
+                        child: const Text('취소'),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: FilledButton(
+                        key: const Key('saveProfileNicknameButton'),
+                        onPressed: () =>
+                            Navigator.of(context).pop(controller.text.trim()),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: playfulLime,
+                          foregroundColor: playfulInk,
+                          side: const BorderSide(color: playfulInk, width: 2.5),
+                        ),
+                        child: const Text('저장'),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('취소'),
-          ),
-          FilledButton(
-            key: const Key('saveProfileNicknameButton'),
-            onPressed: () => Navigator.of(context).pop(controller.text.trim()),
-            child: const Text('저장'),
-          ),
-        ],
       ),
     );
     if (value == null || value.isEmpty || !mounted) return;
