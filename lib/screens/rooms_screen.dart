@@ -14,6 +14,7 @@ import '../widgets/doit_logo.dart';
 import '../widgets/mission_photo.dart';
 import '../widgets/playful_illustrations.dart';
 import '../widgets/playful_ui.dart';
+import '../widgets/sign_out_confirmation.dart';
 import 'global_missions_screen.dart';
 import 'mission_feed_screen.dart';
 import 'room_detail_screen.dart';
@@ -45,6 +46,7 @@ class _RoomsScreenState extends State<RoomsScreen> {
   String? _avatarPath;
   late final LocalProfileStore _profileStore = LocalProfileStore(
     widget.profileStorageScope,
+    supabaseClient: widget.repository.supabaseClient,
   );
   final LocalMediaStore _mediaStore = LocalMediaStore();
   Timer? _dailyRefreshTimer;
@@ -101,12 +103,12 @@ class _RoomsScreenState extends State<RoomsScreen> {
     if (input == null || !mounted) return;
 
     try {
-      final room = widget.repository.createRoom(
+      final room = await widget.repository.createRoomPersisted(
         input.name,
         password: input.password,
       );
       final chatRepository = widget.chatRepository;
-      if (chatRepository != null) {
+      if (chatRepository != null && !widget.repository.isRemote) {
         await chatRepository.ensureRoomConversation(room);
       }
       _message('${room.name} 방을 만들었어요. 초대 코드: ${room.code}');
@@ -114,6 +116,8 @@ class _RoomsScreenState extends State<RoomsScreen> {
       _message(error.message.toString());
     } on ChatRepositoryException catch (error) {
       _message('${error.message} 방을 열면 다시 연결을 시도해요.');
+    } on MissionRepositoryException catch (error) {
+      _message(error.message);
     }
   }
 
@@ -125,12 +129,18 @@ class _RoomsScreenState extends State<RoomsScreen> {
     if (input == null || !mounted) return;
 
     final code = input.code;
-    final localResult = widget.repository.joinRoom(
-      code,
-      password: input.password,
-    );
+    JoinRoomResult localResult;
+    try {
+      localResult = await widget.repository.joinRoomPersisted(
+        code,
+        password: input.password,
+      );
+    } on MissionRepositoryException catch (error) {
+      _message(error.message);
+      return;
+    }
     final chatRepository = widget.chatRepository;
-    if (chatRepository == null) {
+    if (chatRepository == null || widget.repository.isRemote) {
       _message(switch (localResult) {
         JoinRoomResult.joined => '방에 참여했어요!',
         JoinRoomResult.alreadyJoined => '이미 참여 중인 방이에요.',
@@ -347,6 +357,8 @@ class _RoomsScreenState extends State<RoomsScreen> {
                       FilledButton.icon(
                         key: const Key('profileSignOutButton'),
                         onPressed: () async {
+                          final confirmed = await confirmSignOut(sheetContext);
+                          if (!confirmed || !sheetContext.mounted) return;
                           Navigator.of(sheetContext).pop();
                           await widget.onSignOut!();
                         },
@@ -1358,9 +1370,14 @@ class _ProfileAvatar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final path = this.path;
+    final ImageProvider<Object>? image = path == null
+        ? null
+        : path.startsWith('http://') || path.startsWith('https://')
+        ? NetworkImage(path)
+        : FileImage(File(path));
     return CircleAvatar(
       radius: radius,
-      backgroundImage: path == null ? null : FileImage(File(path)),
+      backgroundImage: image,
       child: path == null ? const Icon(Icons.person_rounded) : null,
     );
   }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:random_mission_app/data/local_mission_repository.dart';
 import 'package:random_mission_app/main.dart';
+import 'package:random_mission_app/models/mission_data.dart';
 import 'package:random_mission_app/screens/rooms_screen.dart';
 
 Future<LocalMissionRepository> pumpMvp(WidgetTester tester) async {
@@ -12,6 +13,30 @@ Future<LocalMissionRepository> pumpMvp(WidgetTester tester) async {
 
   final repository = LocalMissionRepository();
   await repository.initialize();
+  final friends = repository.importJoinedRoom(
+    id: 'test-room-friends',
+    name: '친구들의 랜덤 미션',
+    code: 'FRI824',
+    memberCount: 4,
+  );
+  final campus = repository.importJoinedRoom(
+    id: 'test-room-campus',
+    name: '캠퍼스 탐험대',
+    code: 'CAMPUS',
+    memberCount: 6,
+  );
+  repository.addSubmission(
+    roomId: friends.id,
+    missionId: friends.missions.first.id,
+    localPath: '/test/friends.jpg',
+    mediaKind: MissionMediaKind.photo,
+  );
+  repository.addSubmission(
+    roomId: campus.id,
+    missionId: campus.missions.first.id,
+    localPath: '/test/campus.jpg',
+    mediaKind: MissionMediaKind.photo,
+  );
   addTearDown(repository.dispose);
   await tester.pumpWidget(
     RandomMissionApp(skipSplash: true, repository: repository),
@@ -89,6 +114,10 @@ void main() {
     expect(find.text('테스트 사용자'), findsOneWidget);
     await tester.tap(find.byKey(const Key('profileSignOutButton')));
     await pumpUi(tester);
+    expect(find.text('로그아웃할까요?'), findsOneWidget);
+    expect(signedOut, isFalse);
+    await tester.tap(find.byKey(const Key('confirmSignOutButton')));
+    await pumpUi(tester);
     expect(signedOut, isTrue);
   });
 
@@ -112,16 +141,6 @@ void main() {
       repository.joinedRooms
           .firstWhere((room) => room.name == '우리 동네 탐험대')
           .isLocked,
-      isTrue,
-    );
-
-    await tester.tap(find.byKey(const Key('joinRoomButton')));
-    await pumpUi(tester);
-    await tester.enterText(find.byKey(const Key('roomCodeField')), 'NIGHT7');
-    await tester.tap(find.byKey(const Key('confirmJoinRoomButton')));
-    await pumpUi(tester);
-    expect(
-      repository.joinedRooms.any((room) => room.name == '밤 산책 크루'),
       isTrue,
     );
   });
@@ -150,12 +169,12 @@ void main() {
     await pumpUi(tester);
 
     expect(find.text('1/1'), findsOneWidget);
-    expect(find.text('Accepted · 3'), findsOneWidget);
+    expect(find.text('Accepted · 0'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('thumbDownButton')));
     await pumpUi(tester);
-    expect(find.text('Accepted · 2'), findsOneWidget);
-    expect(find.text('Not Accepted · 2'), findsOneWidget);
+    expect(find.text('Accepted · 0'), findsOneWidget);
+    expect(find.text('Not Accepted · 1'), findsOneWidget);
   });
 
   testWidgets('방 설정은 초대 코드와 인원만 노출한다', (tester) async {

@@ -14,6 +14,7 @@ import 'screens/magazine_screen.dart';
 import 'screens/rooms_screen.dart';
 import 'theme/app_theme.dart';
 import 'widgets/playful_illustrations.dart';
+import 'widgets/sign_out_confirmation.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
 const _supabasePublishableKey = String.fromEnvironment(
@@ -203,8 +204,8 @@ class _GuestAppState extends State<_GuestApp> {
   late final LocalMissionRepository _repository = LocalMissionRepository(
     previewUserId: 'local-guest',
     previewUserName: 'Guest',
-    includePreviewData: true,
-    store: SharedPreferencesMissionStore('mission_data_guest_v1'),
+    includePreviewData: false,
+    store: SharedPreferencesMissionStore('mission_data_guest_v2'),
   );
   late final Future<void> _initialization = _repository.initialize();
 
@@ -267,7 +268,7 @@ class _SignedInAppState extends State<_SignedInApp> {
     previewUserId: widget.user.id,
     previewUserName: _displayName,
     includePreviewData: false,
-    store: SharedPreferencesMissionStore('mission_data_${widget.user.id}_v1'),
+    supabaseClient: widget.client,
   );
   late final ChatRepository _chatRepository = SupabaseChatRepository(
     widget.client,
@@ -277,24 +278,15 @@ class _SignedInAppState extends State<_SignedInApp> {
   late Future<void> _initialization = _initialize();
 
   Future<void> _initialize() async {
-    await _missionRepository.initialize();
     try {
       await _chatRepository.ensureProfile(_displayName);
-      final joinedRooms = await _chatRepository.listJoinedRooms();
-      for (final room in joinedRooms) {
-        _missionRepository.importJoinedRoom(
-          id: room.roomId,
-          name: room.roomName,
-          code: room.inviteCode,
-          memberCount: room.memberCount,
-        );
-      }
       _availableChatRepository = _chatRepository;
       _startupNotice = null;
     } catch (_) {
       _availableChatRepository = null;
       _startupNotice = '로그인은 완료됐지만 채팅 서버에 연결하지 못했어요. 미션 기능은 계속 사용할 수 있어요.';
     }
+    await _missionRepository.initialize();
   }
 
   @override
@@ -332,7 +324,11 @@ class _SignedInAppState extends State<_SignedInApp> {
                       child: const Text('다시 시도'),
                     ),
                     TextButton(
-                      onPressed: widget.client.auth.signOut,
+                      onPressed: () async {
+                        if (await confirmSignOut(context)) {
+                          await widget.client.auth.signOut();
+                        }
+                      },
                       child: const Text('로그아웃'),
                     ),
                   ],

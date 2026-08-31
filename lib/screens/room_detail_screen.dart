@@ -47,7 +47,7 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
               kind: MissionMediaKind.photo,
             );
             onProgress(0.7);
-            widget.repository.addSubmission(
+            await widget.repository.addSubmissionPersisted(
               roomId: widget.roomId,
               missionId: mission.id,
               localPath: savedPath,
@@ -254,11 +254,15 @@ class _RoomDetailScreenState extends State<RoomDetailScreen> {
                   const SizedBox(height: 10),
                   _InfoRow(
                     label: '비밀번호',
-                    value: room.password!,
-                    onCopy: () {
-                      Clipboard.setData(ClipboardData(text: room.password!));
-                      showAppSnackBar(context, '비밀번호를 복사했어요.');
-                    },
+                    value: widget.repository.isRemote ? '설정됨' : room.password!,
+                    onCopy: widget.repository.isRemote
+                        ? null
+                        : () {
+                            Clipboard.setData(
+                              ClipboardData(text: room.password!),
+                            );
+                            showAppSnackBar(context, '비밀번호를 복사했어요.');
+                          },
                   ),
                 ],
                 const SizedBox(height: 10),

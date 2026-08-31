@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/mission_data.dart';
 import 'default_missions.dart';
@@ -17,6 +19,15 @@ enum JoinRoomResult {
   roomNotFound,
 }
 
+class MissionRepositoryException implements Exception {
+  const MissionRepositoryException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}
+
 /// In-memory data for the non-production MVP preview.
 ///
 /// This intentionally provides no persistence, authentication, uploads, or
@@ -26,8 +37,9 @@ class LocalMissionRepository extends ChangeNotifier {
   LocalMissionRepository({
     this.previewUserId = 'preview-user',
     this.previewUserName = '나',
-    this.includePreviewData = true,
+    this.includePreviewData = false,
     this.store,
+    this.supabaseClient,
     DateTime Function()? now,
   }) : _now = now ?? DateTime.now;
 
@@ -39,6 +51,7 @@ class LocalMissionRepository extends ChangeNotifier {
   String previewUserName;
   final bool includePreviewData;
   final LocalMissionStore? store;
+  final SupabaseClient? supabaseClient;
   final DateTime Function() _now;
   final Random _secureRandom = Random.secure();
 
@@ -47,6 +60,9 @@ class LocalMissionRepository extends ChangeNotifier {
   final List<ChatMessage> _messages = [];
   final Map<String, Map<String, VoteChoice>> _votesBySubmission = {};
   Future<void> _writeQueue = Future<void>.value();
+  RealtimeChannel? _remoteChannel;
+  Timer? _remoteReloadDebounce;
+  bool _remoteReloading = false;
   String? _missionDateKey;
 
   RepositoryStatus _status = RepositoryStatus.idle;
@@ -55,12 +71,17 @@ class LocalMissionRepository extends ChangeNotifier {
   RepositoryStatus get status => _status;
   String? get errorMessage => _errorMessage;
   bool get isLoading => _status == RepositoryStatus.loading;
+  bool get isRemote => supabaseClient != null;
 
   Future<void> persistPendingChanges() => _writeQueue;
 
   void refreshDailyMissionsIfNeeded() {
     if (_status != RepositoryStatus.ready ||
         _missionDateKey == _dateKey(_now())) {
+      return;
+    }
+    if (isRemote) {
+      _scheduleRemoteReload();
       return;
     }
     _refreshDailyMissions();
@@ -107,21 +128,27 @@ class LocalMissionRepository extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final saved = await store?.load();
-      if (saved != null) {
-        _restore(saved);
-      } else if (includePreviewData) {
-        _seedPreviewData();
+      if (isRemote) {
+        await _loadRemoteState();
+        _subscribeToRemoteChanges();
       } else {
-        _seedEmptyProductData();
+        final saved = await store?.load();
+        if (saved != null) {
+          _restore(saved);
+        } else {
+          _seedEmptyProductData();
+        }
+        _refreshDailyMissions();
+        _persist();
       }
-      _refreshDailyMissions();
       _status = RepositoryStatus.ready;
-      _persist();
-    } catch (_) {
+    } catch (error) {
       _clearData();
-      _errorMessage = '미리보기 데이터를 불러오지 못했어요.';
+      _errorMessage = isRemote
+          ? 'Supabase에서 미션 데이터를 불러오지 못했어요. 서버 마이그레이션을 확인해 주세요.'
+          : '로컬 데이터를 불러오지 못했어요.';
       _status = RepositoryStatus.error;
+      debugPrint('Mission repository initialization failed: $error');
     }
     notifyListeners();
   }
@@ -209,6 +236,29 @@ class LocalMissionRepository extends ChangeNotifier {
     return room;
   }
 
+  Future<MissionRoom> createRoomPersisted(
+    String name, {
+    String? password,
+  }) async {
+    if (!isRemote) return createRoom(name, password: password);
+    final cleanName = _requiredText(name, '방 이름', maxRoomNameLength);
+    final cleanPassword = password?.trim();
+    if (cleanPassword != null && cleanPassword.length > 40) {
+      throw ArgumentError('비밀번호는 40자 이하여야 해요.');
+    }
+    try {
+      final result = await supabaseClient!.rpc(
+        'create_mission_room',
+        params: {'p_name': cleanName, 'p_password': cleanPassword},
+      );
+      await _loadRemoteState(notify: true);
+      final id = (result as Map<String, dynamic>)['id'].toString();
+      return _roomById(id) ?? _roomFromRemote(result);
+    } on PostgrestException catch (error) {
+      throw MissionRepositoryException(_remoteMessage(error));
+    }
+  }
+
   JoinRoomResult joinRoom(String code, {String? password}) {
     _requireReady();
     final cleanCode = code.trim().toUpperCase();
@@ -234,6 +284,36 @@ class LocalMissionRepository extends ChangeNotifier {
     notifyListeners();
     _persist();
     return JoinRoomResult.joined;
+  }
+
+  Future<JoinRoomResult> joinRoomPersisted(
+    String code, {
+    String? password,
+  }) async {
+    if (!isRemote) return joinRoom(code, password: password);
+    final cleanCode = code.trim().toUpperCase();
+    if (!RegExp(r'^[A-Z0-9]{4,12}$').hasMatch(cleanCode)) {
+      return JoinRoomResult.invalidCode;
+    }
+    if (_rooms.any((room) => room.code == cleanCode && room.isJoined)) {
+      return JoinRoomResult.alreadyJoined;
+    }
+    try {
+      await supabaseClient!.rpc(
+        'join_mission_room',
+        params: {'p_invite_code': cleanCode, 'p_password': password?.trim()},
+      );
+      await _loadRemoteState(notify: true);
+      return JoinRoomResult.joined;
+    } on PostgrestException catch (error) {
+      if (error.message.contains('wrong_password')) {
+        return JoinRoomResult.wrongPassword;
+      }
+      if (error.message.contains('invalid_invite')) {
+        return JoinRoomResult.roomNotFound;
+      }
+      throw MissionRepositoryException(_remoteMessage(error));
+    }
   }
 
   MissionRoom importJoinedRoom({
@@ -309,6 +389,83 @@ class LocalMissionRepository extends ChangeNotifier {
     return submission;
   }
 
+  Future<MissionSubmission> addSubmissionPersisted({
+    required String roomId,
+    required String missionId,
+    required String localPath,
+    required MissionMediaKind mediaKind,
+  }) async {
+    if (!isRemote) {
+      return addSubmission(
+        roomId: roomId,
+        missionId: missionId,
+        localPath: localPath,
+        mediaKind: mediaKind,
+      );
+    }
+    if (mediaKind != MissionMediaKind.photo) {
+      throw ArgumentError('사진만 업로드할 수 있어요.');
+    }
+    _accessibleRoom(roomId);
+    if (missionById(roomId, missionId) == null) {
+      throw ArgumentError.value(missionId, 'missionId', 'Unknown mission.');
+    }
+    final client = supabaseClient!;
+    final user = client.auth.currentUser;
+    if (user == null) {
+      throw const MissionRepositoryException('다시 로그인해 주세요.');
+    }
+    final file = File(localPath);
+    if (!await file.exists()) {
+      throw const MissionRepositoryException('업로드할 사진 파일을 찾을 수 없어요.');
+    }
+    final objectName =
+        '${DateTime.now().microsecondsSinceEpoch}-${_secureRandom.nextInt(1 << 32)}.jpg';
+    final storagePath = '$roomId/${user.id}/$objectName';
+    String? submissionId;
+    try {
+      await client.storage
+          .from('mission-photos')
+          .upload(
+            storagePath,
+            file,
+            fileOptions: const FileOptions(
+              contentType: 'image/jpeg',
+              cacheControl: '3600',
+              upsert: false,
+            ),
+          );
+      final result = await client.rpc(
+        'create_mission_submission',
+        params: {
+          'p_room_id': roomId,
+          'p_daily_mission_id': missionId,
+          'p_storage_path': storagePath,
+        },
+      );
+      submissionId = result.toString();
+      await _loadRemoteState(notify: true);
+      return _submissions.firstWhere(
+        (submission) => submission.id == submissionId,
+      );
+    } on Object catch (error) {
+      if (submissionId == null) {
+        try {
+          await client.storage.from('mission-photos').remove([storagePath]);
+        } catch (_) {}
+      }
+      if (error is PostgrestException) {
+        throw MissionRepositoryException(_remoteMessage(error));
+      }
+      if (error is StorageException) {
+        throw MissionRepositoryException(
+          '사진을 서버에 업로드하지 못했어요: ${error.message}',
+        );
+      }
+      rethrow;
+    }
+  }
+
   bool castVote(String submissionId, VoteChoice choice) {
     _requireReady();
     final submissionIndex = _submissions.indexWhere(
@@ -331,6 +488,30 @@ class LocalMissionRepository extends ChangeNotifier {
     notifyListeners();
     _persist();
     return true;
+  }
+
+  Future<bool> castVotePersisted(String submissionId, VoteChoice choice) async {
+    if (!isRemote) return castVote(submissionId, choice);
+    final submission = _submissions.firstWhere(
+      (item) => item.id == submissionId,
+      orElse: () => throw ArgumentError.value(submissionId, 'submissionId'),
+    );
+    if (submission.currentUserVote == choice) return false;
+    try {
+      await supabaseClient!.rpc(
+        'cast_mission_vote',
+        params: {
+          'p_submission_id': submissionId,
+          'p_choice': choice == VoteChoice.accepted
+              ? 'accepted'
+              : 'not_accepted',
+        },
+      );
+      await _loadRemoteState(notify: true);
+      return true;
+    } on PostgrestException catch (error) {
+      throw MissionRepositoryException(_remoteMessage(error));
+    }
   }
 
   ChatMessage sendMessage(String roomId, String text) {
@@ -474,24 +655,6 @@ class LocalMissionRepository extends ChangeNotifier {
     );
   }
 
-  void _seedVotes(
-    String submissionId, {
-    int accepted = 0,
-    int notAccepted = 0,
-    VoteChoice? previewVote,
-  }) {
-    final votes = <String, VoteChoice>{};
-    for (var index = 0; index < accepted; index++) {
-      votes['seed-$submissionId-a-$index'] = VoteChoice.accepted;
-    }
-    for (var index = 0; index < notAccepted; index++) {
-      votes['seed-$submissionId-n-$index'] = VoteChoice.notAccepted;
-    }
-    if (previewVote != null) votes[previewUserId] = previewVote;
-    _votesBySubmission[submissionId] = votes;
-    _syncVotes(submissionId);
-  }
-
   void _clearData() {
     _rooms.clear();
     _submissions.clear();
@@ -530,139 +693,171 @@ class LocalMissionRepository extends ChangeNotifier {
     unawaited(_writeQueue);
   }
 
-  void _seedPreviewData() {
-    _clearData();
-    final now = _now();
-    final friendsMission = Mission(
-      id: 'mission-private-red',
-      title: '빨간색 물건 5개를 한 장에 찍기',
-      createdAt: now.subtract(const Duration(hours: 8)),
-      createdByUserId: 'seed-user-minji',
-    );
-    final campusMission = Mission(
-      id: 'mission-private-1000won',
-      title: '1,000원으로 가장 쓸모없는 물건 사기',
-      createdAt: now.subtract(const Duration(hours: 7)),
-      createdByUserId: 'seed-user-jun',
-    );
-    final nightMission = Mission(
-      id: 'mission-private-shadow',
-      title: '가장 이상한 그림자를 찍기',
-      createdAt: now.subtract(const Duration(hours: 6)),
-      createdByUserId: 'seed-user-sora',
-    );
-    final globalMission = Mission(
-      id: 'mission-global-blue',
-      title: '오늘 발견한 파란색을 공유하기',
-      createdAt: now.subtract(const Duration(hours: 5)),
-      createdByUserId: 'system-preview',
-    );
+  Future<void> _loadRemoteState({bool notify = false}) async {
+    final client = supabaseClient;
+    if (client == null || _remoteReloading) return;
+    _remoteReloading = true;
+    try {
+      final response = await client.rpc('get_mission_state');
+      final root = Map<String, dynamic>.from(response as Map);
+      final roomRows = (root['rooms'] as List<dynamic>? ?? const []);
+      final submissionRows =
+          (root['submissions'] as List<dynamic>? ?? const []);
 
-    _rooms.addAll([
-      MissionRoom(
-        id: 'room-friends',
-        name: '친구들의 랜덤 미션',
-        kind: MissionRoomKind.private,
-        code: 'FRI824',
-        isJoined: true,
-        memberCount: 4,
-        missions: [friendsMission],
-      ),
-      MissionRoom(
-        id: 'room-campus',
-        name: '캠퍼스 탐험대',
-        kind: MissionRoomKind.private,
-        code: 'CAMPUS',
-        isJoined: true,
-        memberCount: 6,
-        missions: [campusMission],
-      ),
-      MissionRoom(
-        id: 'room-night',
-        name: '밤 산책 크루',
-        kind: MissionRoomKind.private,
-        code: 'NIGHT7',
-        isJoined: false,
-        memberCount: 3,
-        missions: [nightMission],
-      ),
-      MissionRoom(
-        id: 'room-global',
-        name: 'Global Mission Room',
-        kind: MissionRoomKind.global,
-        isJoined: true,
-        memberCount: 1284,
-        missions: [globalMission],
-      ),
-    ]);
+      final loadedRooms = roomRows
+          .map((raw) {
+            final row = Map<String, dynamic>.from(raw as Map);
+            final missions = (row['missions'] as List<dynamic>? ?? const [])
+                .map((rawMission) {
+                  final mission = Map<String, dynamic>.from(rawMission as Map);
+                  return Mission(
+                    id: mission['id'].toString(),
+                    title: mission['title'] as String,
+                    createdAt: DateTime.parse(
+                      mission['createdAt'].toString(),
+                    ).toLocal(),
+                    createdByUserId: mission['createdByUserId'].toString(),
+                  );
+                })
+                .toList(growable: false);
+            return _roomFromRemote(row, missions: missions);
+          })
+          .toList(growable: false);
 
-    _submissions.addAll([
-      MissionSubmission(
-        id: 'submission-friends-minji',
-        roomId: 'room-friends',
-        missionId: friendsMission.id,
-        authorUserId: 'seed-user-minji',
-        authorName: '민지',
-        mediaKind: MissionMediaKind.photo,
-        createdAt: now,
-      ),
-      MissionSubmission(
-        id: 'submission-campus-jun',
-        roomId: 'room-campus',
-        missionId: campusMission.id,
-        authorUserId: 'seed-user-jun',
-        authorName: '준',
-        mediaKind: MissionMediaKind.photo,
-        createdAt: now,
-      ),
-      MissionSubmission(
-        id: 'submission-global-sora',
-        roomId: 'room-global',
-        missionId: globalMission.id,
-        authorUserId: 'seed-user-sora',
-        authorName: '소라',
-        mediaKind: MissionMediaKind.photo,
-        createdAt: now,
-      ),
-      MissionSubmission(
-        id: 'submission-global-doyun',
-        roomId: 'room-global',
-        missionId: globalMission.id,
-        authorUserId: 'seed-user-doyun',
-        authorName: '도윤',
-        mediaKind: MissionMediaKind.photo,
-        createdAt: now,
-      ),
-    ]);
+      final loadedSubmissions = await Future.wait(
+        submissionRows.map((raw) async {
+          final row = Map<String, dynamic>.from(raw as Map);
+          final storagePath = row['storagePath'].toString();
+          String? signedUrl;
+          try {
+            signedUrl = await client.storage
+                .from('mission-photos')
+                .createSignedUrl(storagePath, 60 * 60);
+          } catch (_) {
+            signedUrl = null;
+          }
+          final rawVote = row['currentUserVote'] as String?;
+          return MissionSubmission(
+            id: row['id'].toString(),
+            roomId: row['roomId'].toString(),
+            missionId: row['missionId'].toString(),
+            authorUserId: row['authorUserId'].toString(),
+            authorName: row['authorName'] as String? ?? '사용자',
+            storagePath: storagePath,
+            remoteUrl: signedUrl,
+            mediaKind: MissionMediaKind.photo,
+            createdAt: DateTime.parse(row['createdAt'].toString()).toLocal(),
+            acceptedVotes: (row['acceptedVotes'] as num?)?.toInt() ?? 0,
+            notAcceptedVotes: (row['notAcceptedVotes'] as num?)?.toInt() ?? 0,
+            currentUserVote: switch (rawVote) {
+              'accepted' => VoteChoice.accepted,
+              'not_accepted' => VoteChoice.notAccepted,
+              _ => null,
+            },
+          );
+        }),
+      );
 
-    _seedVotes(
-      'submission-friends-minji',
-      accepted: 2,
-      notAccepted: 1,
-      previewVote: VoteChoice.accepted,
+      _clearData();
+      _rooms.addAll(loadedRooms);
+      _submissions.addAll(loadedSubmissions);
+      _missionDateKey = _dateKey(_now());
+      if (notify) notifyListeners();
+    } finally {
+      _remoteReloading = false;
+    }
+  }
+
+  MissionRoom _roomFromRemote(
+    Object? raw, {
+    List<Mission> missions = const [],
+  }) {
+    final row = Map<String, dynamic>.from(raw as Map);
+    final locked = row['isLocked'] == true;
+    return MissionRoom(
+      id: row['id'].toString(),
+      name: row['name'] as String,
+      kind: row['kind'] == 'global'
+          ? MissionRoomKind.global
+          : MissionRoomKind.private,
+      code: row['code'] as String?,
+      password: locked ? 'server-protected' : null,
+      isJoined: true,
+      memberCount: (row['memberCount'] as num?)?.toInt() ?? 0,
+      missions: missions,
     );
-    _seedVotes('submission-campus-jun', accepted: 4);
-    _seedVotes('submission-global-sora', accepted: 12, notAccepted: 2);
-    _seedVotes('submission-global-doyun', accepted: 8, notAccepted: 1);
+  }
 
-    _messages.addAll([
-      ChatMessage(
-        id: 'message-friends-1',
-        roomId: 'room-friends',
-        senderUserId: 'seed-user-minji',
-        senderName: '민지',
-        text: '오늘 미션 생각보다 어렵다 😆',
-        createdAt: now.subtract(const Duration(minutes: 44)),
-      ),
-      ChatMessage(
-        id: 'message-friends-2',
-        roomId: 'room-friends',
-        senderUserId: previewUserId,
-        senderName: previewUserName,
-        text: '퇴근길에 찾아볼게!',
-        createdAt: now.subtract(const Duration(minutes: 40)),
-      ),
-    ]);
+  String _remoteMessage(PostgrestException error) {
+    final message = error.message;
+    if (message.contains('wrong_password')) return '방 비밀번호가 일치하지 않아요.';
+    if (message.contains('invalid_invite')) return '일치하는 방을 찾지 못했어요.';
+    if (message.contains('not_a_room_member')) return '이 방에 접근할 권한이 없어요.';
+    if (message.contains('rate_limit')) return '잠시 후 다시 시도해 주세요.';
+    return '서버 요청을 처리하지 못했어요.';
+  }
+
+  void _subscribeToRemoteChanges() {
+    final client = supabaseClient;
+    if (client == null || _remoteChannel != null) return;
+    _remoteChannel = client
+        .channel('mission-state-$previewUserId')
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'mission_rooms',
+          callback: (_) => _scheduleRemoteReload(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'mission_room_members',
+          callback: (_) => _scheduleRemoteReload(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'daily_room_missions',
+          callback: (_) => _scheduleRemoteReload(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'mission_submissions',
+          callback: (_) => _scheduleRemoteReload(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'mission_votes',
+          callback: (_) => _scheduleRemoteReload(),
+        )
+        .onPostgresChanges(
+          event: PostgresChangeEvent.all,
+          schema: 'public',
+          table: 'chat_profiles',
+          callback: (_) => _scheduleRemoteReload(),
+        )
+        .subscribe();
+  }
+
+  void _scheduleRemoteReload() {
+    if (!isRemote) return;
+    _remoteReloadDebounce?.cancel();
+    _remoteReloadDebounce = Timer(const Duration(milliseconds: 250), () {
+      unawaited(_loadRemoteState(notify: true));
+    });
+  }
+
+  @override
+  void dispose() {
+    _remoteReloadDebounce?.cancel();
+    final channel = _remoteChannel;
+    final client = supabaseClient;
+    if (channel != null && client != null) {
+      unawaited(client.removeChannel(channel));
+    }
+    super.dispose();
   }
 
   void _seedEmptyProductData() {

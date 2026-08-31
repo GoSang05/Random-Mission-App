@@ -1,5 +1,37 @@
 # Random Mission App - Project Context
 
+## Supabase Backend Transition (2026-08-31)
+
+* The active backend is the user's `GoSang05's Project` Supabase project
+  (`vzlzrpghnrmncwvfhdil`). All repository migrations were deployed there on
+  2026-08-31, and the local ignored `supabase.env.json` points to this project.
+* Signed-in users use Supabase for Auth, private/global rooms, memberships,
+  server-selected daily missions, photo submissions, votes, profiles, and
+  realtime chat.
+* Mission photos and profile avatars are stored in private Supabase Storage
+  buckets and protected by authenticated RLS policies.
+* The app contains no bundled preview rooms, preview submissions, seed votes,
+  or seed messages. Widget tests create their own isolated fixtures.
+* Guest mode is a local-only development path and starts with empty private
+  data. Its storage key was advanced to avoid restoring the former preview
+  snapshot.
+* New clones must create their own ignored `supabase.env.json`. Reusing this
+  backend requires a publishable key from the project owner; using a different
+  project also requires applying both repository migrations there.
+* Existing remote room chats are migrated into mission rooms without deleting
+  their messages or memberships. Legacy room passwords did not exist on the
+  server and therefore cannot be recovered.
+* Email/password signup requires email confirmation. After signup the app shows
+  a dedicated waiting screen with resend and confirmation-check actions.
+* The project currently uses Supabase's default mailer, so confirmation mail is
+  restricted to organization-member addresses until custom SMTP is configured.
+* Native Google account selection is implemented in Flutter, but production
+  activation still requires stable Android/iOS app identifiers plus Google
+  OAuth client IDs and enabling the Google provider in Supabase.
+* Profile display-name changes update existing chat message display names on
+  the server. Mission submission names are joined from the current profile and
+  refresh through Realtime profile changes.
+
 ## Unified Home Story Feed (2026-08-30)
 
 * Opening a story from the home screen uses one continuous feed containing today's photo stories from every joined private room.

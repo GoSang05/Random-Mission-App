@@ -57,10 +57,17 @@ class _MissionFeedScreenState extends State<MissionFeedScreen> {
     super.dispose();
   }
 
-  void _vote(MissionSubmission submission, VoteChoice choice) {
-    final changed = widget.repository.castVote(submission.id, choice);
-    if (!changed) {
-      showAppSnackBar(context, '이미 같은 선택으로 투표했어요.');
+  Future<void> _vote(MissionSubmission submission, VoteChoice choice) async {
+    try {
+      final changed = await widget.repository.castVotePersisted(
+        submission.id,
+        choice,
+      );
+      if (!changed && mounted) {
+        showAppSnackBar(context, '이미 같은 선택으로 투표했어요.');
+      }
+    } on MissionRepositoryException catch (error) {
+      if (mounted) showAppSnackBar(context, error.message);
     }
   }
 

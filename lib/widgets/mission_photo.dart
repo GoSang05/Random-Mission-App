@@ -89,6 +89,16 @@ class _Media extends StatelessWidget {
         errorBuilder: (_, _, _) => _Placeholder(submission: submission),
       );
     }
+    final remoteUrl = submission.remoteUrl;
+    if (remoteUrl != null &&
+        remoteUrl.isNotEmpty &&
+        submission.mediaKind == MissionMediaKind.photo) {
+      return Image.network(
+        remoteUrl,
+        fit: BoxFit.cover,
+        errorBuilder: (_, _, _) => _Placeholder(submission: submission),
+      );
+    }
     return _Placeholder(submission: submission);
   }
 }

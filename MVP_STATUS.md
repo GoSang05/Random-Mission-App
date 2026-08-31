@@ -1,50 +1,56 @@
-# Random Mission MVP status
+# Random Mission backend status
 
-The Random Mission experience currently runs as a clearly labeled local MVP
-preview. Rooms, missions, submissions, votes, and chat reset when the app
-restarts. The existing magazine page still uses its existing Supabase calls.
+The signed-in application is designed to use Supabase for authentication,
+rooms, room membership, daily missions, photo submissions, votes, profiles,
+and realtime chat. Mission photos and profile avatars use private Supabase
+Storage buckets with RLS policies.
 
-## Included now
+Guest mode remains a local-only development convenience. It starts empty and
+does not include bundled preview rooms, submissions, votes, or messages.
 
-- Home loading, empty, error, private-room, global-room, and recent-story UI
-- Local room creation and invite-code joining
-- Private-room missions, horizontal stories, and basic chat
-- Global missions and user-created global missions
-- Horizontal story viewer with one vote per preview user and visible totals
-- Styled photo/video capture flow with cancellation, permission, progress,
-  success, and failure states
-- Mobile-flow, repository, and capture-state tests
+## Remote deployment
 
-The MVP is currently portrait-only so the capture controls remain usable on
-small phones.
+All migrations in `supabase/migrations` were applied on 2026-08-31 to the
+active `GoSang05's Project` Supabase project (`vzlzrpghnrmncwvfhdil`):
 
-Android activity-death recovery is not connected in this local preview. It
-requires persisting the pending room and mission before opening the system
-camera so a recovered file cannot be attached to the wrong mission.
+1. `202608250001_create_chat.sql`
+2. `202608310001_create_mission_backend.sql`
+3. `202608310002_sync_profile_names.sql`
 
-## Required before production persistence
+The second migration created the mission tables, RPCs, realtime publication
+entries, and the private `mission-photos` and `profile-avatars` buckets.
+The third migration keeps existing chat sender names synchronized with profile
+changes and publishes profile updates through Realtime.
 
-No mission schema, migration, RLS policy, Storage policy, or implemented auth
-flow exists in this checkout. Before connecting the repository:
+## Authentication status
 
-1. Provide a current Supabase schema export or approve read-only inspection of
-   the remote project.
-2. Decide the authentication flow. The current app has no sign-in or sign-up
-   implementation to reuse.
-3. Review and approve SQL for rooms, room membership, missions, submissions,
-   unique per-user votes, chat messages, and a private media bucket. No SQL has
-   been created or applied by this MVP work.
-4. Replace `LocalMissionRepository` with a Supabase-backed implementation and
-   enable Realtime only for chat, votes, and submission updates.
-5. Store private media under an authenticated path such as
-   `<room-id>/<user-id>/<submission-id>.<extension>` and enforce membership in
-   both database and Storage policies.
+Email/password signup, confirmation waiting, resend, confirmation checking,
+login, and confirmed logout are implemented. Supabase email confirmation is
+enabled, but the project still uses the restricted default mailer; custom SMTP
+is required for arbitrary public email addresses.
 
-## Dependency approval still needed
+The native Google account-picker code and UI are implemented. Google OAuth is
+not yet active because the Google web/iOS client IDs are empty and the Google
+provider is disabled in Supabase. Final activation requires selecting a stable
+application ID, registering its Android SHA-1 in Google Cloud, and adding the
+resulting OAuth credentials to Supabase and `supabase.env.json`.
 
-`image_picker` provides the styled flow around the operating system's capture
-screen. A live embedded camera preview and in-app video playback require the
-uninstalled `camera` and `video_player` packages. The current platform files
-include the required camera/photo descriptions and the iOS microphone usage
-description for the existing short-video capture flow. Android delegates this
-flow to the system camera and needs no app-level microphone permission.
+`supabase.env.json` is intentionally ignored by Git. Every clone needs a local
+copy with this project's URL and publishable key, or must point to a separately
+migrated Supabase project. Never use a service-role key in the Flutter app.
+
+## Local persistence that remains
+
+Guest rooms and guest profile data use device storage. Camera photos are first
+optimized locally before signed-in uploads. The Magazine screen continues to
+store its personal layout selection locally; its UI has not been changed.
+
+## Verification
+
+Run:
+
+```powershell
+flutter analyze
+flutter test
+flutter run --dart-define-from-file=supabase.env.json
+```

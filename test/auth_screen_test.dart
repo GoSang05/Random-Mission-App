@@ -8,11 +8,17 @@ class _FakeAuthService implements AuthService {
   String? signedInPassword;
   String? signedUpEmail;
   String? confirmationEmail;
+  bool googleSignInCalled = false;
 
   @override
   Future<void> signIn({required String email, required String password}) async {
     signedInEmail = email;
     signedInPassword = password;
+  }
+
+  @override
+  Future<void> signInWithGoogle() async {
+    googleSignInCalled = true;
   }
 
   @override
@@ -108,15 +114,42 @@ void main() {
     expect(service.signedUpEmail, isNull);
   });
 
-  testWidgets('로그인 화면에서 인증 이메일을 다시 요청할 수 있다', (tester) async {
+  testWidgets('회원가입 뒤 인증 대기 화면에서 인증 이메일을 다시 요청한다', (tester) async {
     final service = await _pumpAuth(tester);
 
+    await tester.tap(find.text('처음이신가요? 계정 만들기'));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const Key('authDisplayNameField')),
+      '두잇 사용자',
+    );
     await tester.enterText(
       find.byKey(const Key('authEmailField')),
       'USER@example.com',
     );
+    await tester.enterText(
+      find.byKey(const Key('authPasswordField')),
+      'password1',
+    );
+    await tester.enterText(
+      find.byKey(const Key('authConfirmPasswordField')),
+      'password1',
+    );
+    await tester.tap(find.byKey(const Key('authSubmitButton')));
+    await tester.pump();
+
+    expect(find.text('인증 메일을 확인해 주세요'), findsOneWidget);
     await tester.tap(find.byKey(const Key('authResendConfirmationButton')));
     await tester.pump();
     expect(service.confirmationEmail, 'user@example.com');
+  });
+
+  testWidgets('Google 로그인 버튼이 인증 서비스를 호출한다', (tester) async {
+    final service = await _pumpAuth(tester);
+
+    await tester.tap(find.byKey(const Key('googleSignInButton')));
+    await tester.pump();
+
+    expect(service.googleSignInCalled, isTrue);
   });
 }

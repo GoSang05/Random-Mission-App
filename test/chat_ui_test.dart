@@ -141,13 +141,19 @@ void main() {
     addTearDown(missionRepository.dispose);
     addTearDown(chatRepository.dispose);
     await missionRepository.initialize();
+    final room = missionRepository.importJoinedRoom(
+      id: 'test-room-friends',
+      name: '친구들의 랜덤 미션',
+      code: 'FRI824',
+      memberCount: 2,
+    );
 
     await tester.pumpWidget(
       MaterialApp(
         home: RoomDetailScreen(
           repository: missionRepository,
           chatRepository: chatRepository,
-          roomId: 'room-friends',
+          roomId: room.id,
         ),
       ),
     );

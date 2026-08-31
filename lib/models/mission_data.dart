@@ -71,6 +71,8 @@ class MissionSubmission {
     required this.mediaKind,
     required this.createdAt,
     this.localPath,
+    this.remoteUrl,
+    this.storagePath,
     this.acceptedVotes = 0,
     this.notAcceptedVotes = 0,
     this.currentUserVote,
@@ -82,6 +84,8 @@ class MissionSubmission {
   final String authorUserId;
   final String authorName;
   final String? localPath;
+  final String? remoteUrl;
+  final String? storagePath;
   final MissionMediaKind mediaKind;
   final DateTime createdAt;
   final int acceptedVotes;
@@ -100,6 +104,8 @@ class MissionSubmission {
       authorUserId: authorUserId,
       authorName: authorName,
       localPath: localPath,
+      remoteUrl: remoteUrl,
+      storagePath: storagePath,
       mediaKind: mediaKind,
       createdAt: createdAt,
       acceptedVotes: acceptedVotes ?? this.acceptedVotes,

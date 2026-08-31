@@ -47,7 +47,7 @@ class _GlobalMissionsScreenState extends State<GlobalMissionsScreen> {
               kind: MissionMediaKind.photo,
             );
             onProgress(0.7);
-            widget.repository.addSubmission(
+            await widget.repository.addSubmissionPersisted(
               roomId: room.id,
               missionId: mission.id,
               localPath: savedPath,
