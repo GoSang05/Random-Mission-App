@@ -316,6 +316,101 @@ class LocalMissionRepository extends ChangeNotifier {
     }
   }
 
+  Future<void> leaveRoomPersisted(String roomId) async {
+    final room = _accessibleRoom(roomId);
+    if (room.isGlobal) {
+      throw const MissionRepositoryException(
+        'Global Mission Room에서는 나갈 수 없어요.',
+      );
+    }
+    if (isRemote) {
+      try {
+        await supabaseClient!.rpc(
+          'leave_mission_room',
+          params: {'p_room_id': roomId},
+        );
+        await _loadRemoteState(notify: true);
+        return;
+      } on PostgrestException catch (error) {
+        throw MissionRepositoryException(_remoteMessage(error));
+      }
+    }
+
+    _messages.add(
+      ChatMessage(
+        id: _id('message'),
+        roomId: roomId,
+        senderUserId: 'system',
+        senderName: '알림',
+        text: '$previewUserName님이 방을 나갔어요.',
+        createdAt: _now(),
+      ),
+    );
+    _rooms.removeWhere((item) => item.id == roomId);
+    _submissions.removeWhere((item) => item.roomId == roomId);
+    notifyListeners();
+    _persist();
+  }
+
+  Future<void> renameRoomPersisted(String roomId, String name) async {
+    final room = _accessibleRoom(roomId);
+    if (room.isGlobal) {
+      throw const MissionRepositoryException(
+        'Global Mission Room 이름은 바꿀 수 없어요.',
+      );
+    }
+    final cleanName = _requiredText(name, '방 이름', maxRoomNameLength);
+    if (isRemote) {
+      try {
+        await supabaseClient!.rpc(
+          'rename_mission_room',
+          params: {'p_room_id': roomId, 'p_name': cleanName},
+        );
+        await _loadRemoteState(notify: true);
+        return;
+      } on PostgrestException catch (error) {
+        if (error.message.contains('owner_required')) {
+          throw const MissionRepositoryException('방을 만든 사람만 이름을 바꿀 수 있어요.');
+        }
+        throw MissionRepositoryException(_remoteMessage(error));
+      }
+    }
+    final index = _rooms.indexWhere((item) => item.id == roomId);
+    _rooms[index] = room.copyWith(name: cleanName);
+    notifyListeners();
+    _persist();
+  }
+
+  Future<List<MissionRoomMember>> listRoomMembers(String roomId) async {
+    final room = _accessibleRoom(roomId);
+    if (room.isGlobal) return const [];
+    if (!isRemote) {
+      return [
+        MissionRoomMember(
+          userId: previewUserId,
+          displayName: previewUserName,
+          joinedAt: _now(),
+          isOwner: true,
+        ),
+      ];
+    }
+    try {
+      final result = await supabaseClient!.rpc(
+        'list_mission_room_members',
+        params: {'p_room_id': roomId},
+      );
+      return (result as List<dynamic>)
+          .map(
+            (row) => MissionRoomMember.fromJson(
+              Map<String, dynamic>.from(row as Map),
+            ),
+          )
+          .toList(growable: false);
+    } on PostgrestException catch (error) {
+      throw MissionRepositoryException(_remoteMessage(error));
+    }
+  }
+
   MissionRoom importJoinedRoom({
     required String id,
     required String name,

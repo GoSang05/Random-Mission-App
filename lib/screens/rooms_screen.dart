@@ -122,22 +122,35 @@ class _RoomsScreenState extends State<RoomsScreen> {
   }
 
   Future<void> _joinRoom() async {
-    final input = await showDialog<_JoinRoomInput>(
+    final code = await showDialog<String>(
       context: context,
       builder: (_) => const _JoinRoomDialog(),
     );
-    if (input == null || !mounted) return;
+    if (code == null || !mounted) return;
 
-    final code = input.code;
     JoinRoomResult localResult;
     try {
-      localResult = await widget.repository.joinRoomPersisted(
-        code,
-        password: input.password,
-      );
+      localResult = await widget.repository.joinRoomPersisted(code);
     } on MissionRepositoryException catch (error) {
       _message(error.message);
       return;
+    }
+    if (!mounted) return;
+    if (localResult == JoinRoomResult.wrongPassword) {
+      final password = await showDialog<String>(
+        context: context,
+        builder: (_) => _JoinRoomPasswordDialog(code: code),
+      );
+      if (password == null || !mounted) return;
+      try {
+        localResult = await widget.repository.joinRoomPersisted(
+          code,
+          password: password,
+        );
+      } on MissionRepositoryException catch (error) {
+        _message(error.message);
+        return;
+      }
     }
     final chatRepository = widget.chatRepository;
     if (chatRepository == null || widget.repository.isRemote) {
@@ -1217,57 +1230,69 @@ class _CreateRoomDialogState extends State<_CreateRoomDialog> {
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('새 방 만들기'),
+    return _PlayfulRoomDialogShell(
+      icon: Icons.add_rounded,
+      title: '새 방 만들기',
+      accentColor: playfulLime,
       content: Form(
         key: _formKey,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextFormField(
+            _RoomDialogField(
               key: const Key('roomNameField'),
               controller: _controller,
               autofocus: true,
               maxLength: LocalMissionRepository.maxRoomNameLength,
-              decoration: const InputDecoration(labelText: '방 이름'),
+              label: '방 이름',
+              icon: Icons.meeting_room_outlined,
               validator: (value) => value == null || value.trim().isEmpty
                   ? '방 이름을 입력해주세요.'
                   : null,
             ),
-            SwitchListTile(
-              key: const Key('privateRoomSwitch'),
-              contentPadding: EdgeInsets.zero,
-              title: const Text('비밀 방'),
-              subtitle: const Text('입장할 때 비밀번호가 필요해요.'),
-              value: _isPrivate,
-              onChanged: (value) => setState(() => _isPrivate = value),
+            const SizedBox(height: 14),
+            Material(
+              color: const Color(0xFFF0E8FF),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(19),
+                side: const BorderSide(color: playfulInk, width: 2.5),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: SwitchListTile(
+                key: const Key('privateRoomSwitch'),
+                contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+                activeThumbColor: playfulLime,
+                activeTrackColor: playfulPurple,
+                title: const Text(
+                  '비밀 방',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                subtitle: const Text('입장 비밀번호를 설정해요.'),
+                value: _isPrivate,
+                onChanged: (value) => setState(() => _isPrivate = value),
+              ),
             ),
-            if (_isPrivate)
-              TextFormField(
+            if (_isPrivate) ...[
+              const SizedBox(height: 14),
+              _RoomDialogField(
                 key: const Key('roomPasswordField'),
                 controller: _passwordController,
                 obscureText: true,
                 maxLength: 40,
-                decoration: const InputDecoration(labelText: '입장 비밀번호'),
+                label: '입장 비밀번호',
+                icon: Icons.lock_outline_rounded,
                 validator: (value) => value == null || value.trim().isEmpty
                     ? '비밀번호를 입력해주세요.'
                     : null,
                 onFieldSubmitted: (_) => _submit(),
               ),
+            ],
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
-        ),
-        FilledButton(
-          key: const Key('confirmCreateRoomButton'),
-          onPressed: _submit,
-          child: const Text('방 만들기'),
-        ),
-      ],
+      confirmKey: const Key('confirmCreateRoomButton'),
+      confirmLabel: '방 만들기',
+      onConfirm: _submit,
     );
   }
 }
@@ -1282,67 +1307,283 @@ class _JoinRoomDialog extends StatefulWidget {
 class _JoinRoomDialogState extends State<_JoinRoomDialog> {
   final _formKey = GlobalKey<FormState>();
   final _controller = TextEditingController();
-  final _passwordController = TextEditingController();
 
   @override
   void dispose() {
     _controller.dispose();
-    _passwordController.dispose();
     super.dispose();
   }
 
   void _submit() {
     if (!_formKey.currentState!.validate()) return;
-    Navigator.of(context).pop(
-      _JoinRoomInput(
-        code: _controller.text.trim(),
-        password: _passwordController.text.trim(),
-      ),
-    );
+    Navigator.of(context).pop(_controller.text.trim().toUpperCase());
   }
 
   @override
   Widget build(BuildContext context) {
-    return AlertDialog(
-      title: const Text('코드로 참여'),
+    return _PlayfulRoomDialogShell(
+      icon: Icons.vpn_key_rounded,
+      title: '코드로 참여',
+      accentColor: const Color(0xFFE8DCFF),
       content: Form(
         key: _formKey,
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            TextFormField(
+            _RoomDialogField(
               key: const Key('roomCodeField'),
               controller: _controller,
               autofocus: true,
               textCapitalization: TextCapitalization.characters,
               maxLength: 12,
-              decoration: const InputDecoration(hintText: '예: NIGHT7'),
+              label: '초대 코드 (예: NIGHT7)',
+              icon: Icons.key_rounded,
               validator: (value) => value == null || value.trim().isEmpty
                   ? '초대 코드를 입력해주세요.'
                   : null,
-            ),
-            TextFormField(
-              key: const Key('joinRoomPasswordField'),
-              controller: _passwordController,
-              obscureText: true,
-              maxLength: 40,
-              decoration: const InputDecoration(labelText: '비밀번호 (비밀 방인 경우)'),
               onFieldSubmitted: (_) => _submit(),
             ),
           ],
         ),
       ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('취소'),
+      confirmKey: const Key('confirmJoinRoomButton'),
+      confirmLabel: '참여하기',
+      onConfirm: _submit,
+    );
+  }
+}
+
+class _JoinRoomPasswordDialog extends StatefulWidget {
+  const _JoinRoomPasswordDialog({required this.code});
+
+  final String code;
+
+  @override
+  State<_JoinRoomPasswordDialog> createState() =>
+      _JoinRoomPasswordDialogState();
+}
+
+class _JoinRoomPasswordDialogState extends State<_JoinRoomPasswordDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _controller = TextEditingController();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    if (!_formKey.currentState!.validate()) return;
+    Navigator.of(context).pop(_controller.text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _PlayfulRoomDialogShell(
+      icon: Icons.lock_rounded,
+      title: '비밀번호 입력',
+      accentColor: const Color(0xFFE8DCFF),
+      content: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '${widget.code} 방은 잠겨 있어요.',
+              style: const TextStyle(
+                color: playfulInk,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 14),
+            _RoomDialogField(
+              key: const Key('joinRoomPasswordField'),
+              controller: _controller,
+              autofocus: true,
+              obscureText: true,
+              maxLength: 40,
+              label: '입장 비밀번호',
+              icon: Icons.lock_outline_rounded,
+              validator: (value) =>
+                  value == null || value.isEmpty ? '비밀번호를 입력해주세요.' : null,
+              onFieldSubmitted: (_) => _submit(),
+            ),
+          ],
         ),
-        FilledButton(
-          key: const Key('confirmJoinRoomButton'),
-          onPressed: _submit,
-          child: const Text('참여하기'),
+      ),
+      confirmKey: const Key('confirmJoinRoomPasswordButton'),
+      confirmLabel: '참여하기',
+      onConfirm: _submit,
+    );
+  }
+}
+
+class _PlayfulRoomDialogShell extends StatelessWidget {
+  const _PlayfulRoomDialogShell({
+    required this.icon,
+    required this.title,
+    required this.accentColor,
+    required this.content,
+    required this.confirmKey,
+    required this.confirmLabel,
+    required this.onConfirm,
+  });
+
+  final IconData icon;
+  final String title;
+  final Color accentColor;
+  final Widget content;
+  final Key confirmKey;
+  final String confirmLabel;
+  final VoidCallback onConfirm;
+
+  @override
+  Widget build(BuildContext context) {
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 22, vertical: 24),
+      child: SingleChildScrollView(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 440),
+          child: PlayfulPanel(
+            color: playfulCream,
+            radius: 30,
+            padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        color: accentColor,
+                        borderRadius: BorderRadius.circular(17),
+                        border: Border.all(color: playfulInk, width: 2.5),
+                      ),
+                      child: Icon(icon, color: playfulInk, size: 30),
+                    ),
+                    const SizedBox(width: 13),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          color: playfulInk,
+                          fontSize: 25,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -1,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '닫기',
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 20),
+                content,
+                const SizedBox(height: 20),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size.fromHeight(54),
+                          foregroundColor: playfulInk,
+                          backgroundColor: Colors.white,
+                          side: const BorderSide(color: playfulInk, width: 2.5),
+                        ),
+                        child: const Text('취소'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        key: confirmKey,
+                        onPressed: onConfirm,
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size.fromHeight(54),
+                          backgroundColor: playfulPurple,
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: playfulInk, width: 2.5),
+                        ),
+                        child: Text(
+                          confirmLabel,
+                          style: const TextStyle(fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
-      ],
+      ),
+    );
+  }
+}
+
+class _RoomDialogField extends StatelessWidget {
+  const _RoomDialogField({
+    required super.key,
+    required this.controller,
+    required this.label,
+    required this.icon,
+    this.autofocus = false,
+    this.obscureText = false,
+    this.maxLength,
+    this.textCapitalization = TextCapitalization.none,
+    this.validator,
+    this.onFieldSubmitted,
+  });
+
+  final TextEditingController controller;
+  final String label;
+  final IconData icon;
+  final bool autofocus;
+  final bool obscureText;
+  final int? maxLength;
+  final TextCapitalization textCapitalization;
+  final FormFieldValidator<String>? validator;
+  final ValueChanged<String>? onFieldSubmitted;
+
+  @override
+  Widget build(BuildContext context) {
+    return TextFormField(
+      controller: controller,
+      autofocus: autofocus,
+      obscureText: obscureText,
+      maxLength: maxLength,
+      textCapitalization: textCapitalization,
+      validator: validator,
+      onFieldSubmitted: onFieldSubmitted,
+      decoration: InputDecoration(
+        hintText: label,
+        counterText: '',
+        prefixIcon: Icon(icon, color: playfulPurple),
+        filled: true,
+        fillColor: Colors.white,
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(19),
+          borderSide: const BorderSide(color: playfulInk, width: 2.5),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(19),
+          borderSide: const BorderSide(color: playfulPurple, width: 3),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(19),
+          borderSide: const BorderSide(color: Color(0xFFD8455D), width: 2.5),
+        ),
+      ),
     );
   }
 }
@@ -1352,13 +1593,6 @@ class _CreateRoomInput {
 
   final String name;
   final String? password;
-}
-
-class _JoinRoomInput {
-  const _JoinRoomInput({required this.code, required this.password});
-
-  final String code;
-  final String password;
 }
 
 class _ProfileAvatar extends StatelessWidget {

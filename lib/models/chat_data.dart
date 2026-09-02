@@ -51,6 +51,7 @@ class RemoteChatMessage {
     required this.senderName,
     required this.text,
     required this.createdAt,
+    this.isSystem = false,
   });
 
   final String id;
@@ -59,6 +60,7 @@ class RemoteChatMessage {
   final String senderName;
   final String text;
   final DateTime createdAt;
+  final bool isSystem;
 
   factory RemoteChatMessage.fromJson(Map<String, dynamic> json) {
     return RemoteChatMessage(
@@ -68,6 +70,7 @@ class RemoteChatMessage {
       senderName: json['sender_display_name'] as String,
       text: json['body'] as String,
       createdAt: DateTime.parse(json['created_at'] as String).toLocal(),
+      isSystem: json['message_kind'] == 'system',
     );
   }
 }

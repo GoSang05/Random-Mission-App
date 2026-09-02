@@ -9,11 +9,10 @@ import 'data/chat_repository.dart';
 import 'data/guest_session_store.dart';
 import 'data/local_mission_repository.dart';
 import 'data/local_mission_store.dart';
+import 'data/local_profile_store.dart';
 import 'screens/auth_screen.dart';
-import 'screens/magazine_screen.dart';
 import 'screens/rooms_screen.dart';
 import 'theme/app_theme.dart';
-import 'widgets/playful_illustrations.dart';
 import 'widgets/sign_out_confirmation.dart';
 
 const _supabaseUrl = String.fromEnvironment('SUPABASE_URL');
@@ -56,7 +55,7 @@ class RandomMissionApp extends StatefulWidget {
 class _GuestOnlyEntry extends StatelessWidget {
   const _GuestOnlyEntry({required this.onGuest});
 
-  final VoidCallback onGuest;
+  final ValueChanged<String> onGuest;
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +81,7 @@ class _GuestOnlyEntry extends StatelessWidget {
                 const SizedBox(height: 18),
                 FilledButton.icon(
                   key: const Key('offlineGuestModeButton'),
-                  onPressed: onGuest,
+                  onPressed: () => onGuest('Guest'),
                   icon: const Icon(Icons.person_outline_rounded),
                   label: const Text('Guest 모드로 시작'),
                 ),
@@ -128,6 +127,7 @@ class _AuthGate extends StatefulWidget {
 class _AuthGateState extends State<_AuthGate> {
   final GuestSessionStore _guestSessionStore = GuestSessionStore();
   bool? _guestEnabled;
+  String _guestDisplayName = 'Guest';
 
   @override
   void initState() {
@@ -137,12 +137,25 @@ class _AuthGateState extends State<_AuthGate> {
 
   Future<void> _loadGuestMode() async {
     final enabled = await _guestSessionStore.load();
-    if (mounted) setState(() => _guestEnabled = enabled);
+    final profile = await LocalProfileStore('guest').load();
+    if (mounted) {
+      setState(() {
+        _guestEnabled = enabled;
+        _guestDisplayName = profile?.displayName ?? 'Guest';
+      });
+    }
   }
 
-  Future<void> _enterGuestMode() async {
+  Future<void> _enterGuestMode(String displayName) async {
+    final cleanName = displayName.trim().isEmpty ? 'Guest' : displayName.trim();
+    await LocalProfileStore('guest').save(LocalProfile(displayName: cleanName));
     await _guestSessionStore.setEnabled(true);
-    if (mounted) setState(() => _guestEnabled = true);
+    if (mounted) {
+      setState(() {
+        _guestDisplayName = cleanName;
+        _guestEnabled = true;
+      });
+    }
   }
 
   Future<void> _exitGuestMode() async {
@@ -159,6 +172,7 @@ class _AuthGateState extends State<_AuthGate> {
       return _guestEnabled!
           ? _GuestApp(
               skipSplash: widget.skipSplash,
+              displayName: _guestDisplayName,
               onExitGuest: _exitGuestMode,
             )
           : _GuestOnlyEntry(onGuest: _enterGuestMode);
@@ -173,6 +187,7 @@ class _AuthGateState extends State<_AuthGate> {
         if (session == null && _guestEnabled!) {
           return _GuestApp(
             skipSplash: widget.skipSplash,
+            displayName: _guestDisplayName,
             onExitGuest: _exitGuestMode,
           );
         }
@@ -191,9 +206,14 @@ class _AuthGateState extends State<_AuthGate> {
 }
 
 class _GuestApp extends StatefulWidget {
-  const _GuestApp({required this.skipSplash, required this.onExitGuest});
+  const _GuestApp({
+    required this.skipSplash,
+    required this.displayName,
+    required this.onExitGuest,
+  });
 
   final bool skipSplash;
+  final String displayName;
   final Future<void> Function() onExitGuest;
 
   @override
@@ -203,7 +223,7 @@ class _GuestApp extends StatefulWidget {
 class _GuestAppState extends State<_GuestApp> {
   late final LocalMissionRepository _repository = LocalMissionRepository(
     previewUserId: 'local-guest',
-    previewUserName: 'Guest',
+    previewUserName: widget.displayName,
     includePreviewData: false,
     store: SharedPreferencesMissionStore('mission_data_guest_v2'),
   );
@@ -227,7 +247,7 @@ class _GuestAppState extends State<_GuestApp> {
         }
         final app = _AppShell(
           repository: _repository,
-          displayName: 'Guest',
+          displayName: widget.displayName,
           isGuest: true,
           onSignOut: widget.onExitGuest,
           localStorageScope: 'guest',
@@ -236,7 +256,7 @@ class _GuestAppState extends State<_GuestApp> {
             ? app
             : _SplashGate(
                 repository: _repository,
-                displayName: 'Guest',
+                displayName: widget.displayName,
                 isGuest: true,
                 onSignOut: widget.onExitGuest,
                 localStorageScope: 'guest',
@@ -454,8 +474,6 @@ class _AppShell extends StatefulWidget {
 }
 
 class _AppShellState extends State<_AppShell> {
-  var _selectedIndex = 0;
-
   @override
   void initState() {
     super.initState();
@@ -472,130 +490,13 @@ class _AppShellState extends State<_AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final chatRepository = widget.chatRepository;
-    final pages = [
-      RoomsScreen(
-        repository: widget.repository,
-        chatRepository: chatRepository,
-        displayName: widget.displayName,
-        isGuest: widget.isGuest,
-        onSignOut: widget.onSignOut,
-        profileStorageScope: widget.localStorageScope,
-      ),
-      MagazineScreen(storageScope: widget.localStorageScope),
-    ];
-
-    return Scaffold(
-      body: IndexedStack(index: _selectedIndex, children: pages),
-      bottomNavigationBar: _PlayfulBottomNavigation(
-        selectedIndex: _selectedIndex,
-        onDestinationSelected: (index) =>
-            setState(() => _selectedIndex = index),
-      ),
-    );
-  }
-}
-
-class _PlayfulBottomNavigation extends StatelessWidget {
-  const _PlayfulBottomNavigation({
-    required this.selectedIndex,
-    required this.onDestinationSelected,
-  });
-
-  final int selectedIndex;
-  final ValueChanged<int> onDestinationSelected;
-
-  @override
-  Widget build(BuildContext context) {
-    return ColoredBox(
-      color: playfulCream,
-      child: SafeArea(
-        top: false,
-        minimum: const EdgeInsets.fromLTRB(18, 7, 18, 10),
-        child: Container(
-          height: 72,
-          padding: const EdgeInsets.all(6),
-          decoration: BoxDecoration(
-            color: const Color(0xFFFFFEF8),
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: playfulInk, width: 3),
-            boxShadow: const [
-              BoxShadow(color: playfulInk, offset: Offset(0, 5)),
-            ],
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: _BottomDestination(
-                  selected: selectedIndex == 0,
-                  icon: Icons.groups_rounded,
-                  label: '미션',
-                  onTap: () => onDestinationSelected(0),
-                ),
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: _BottomDestination(
-                  selected: selectedIndex == 1,
-                  icon: Icons.auto_stories_outlined,
-                  label: '매거진',
-                  onTap: () => onDestinationSelected(1),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _BottomDestination extends StatelessWidget {
-  const _BottomDestination({
-    required this.selected,
-    required this.icon,
-    required this.label,
-    required this.onTap,
-  });
-
-  final bool selected;
-  final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      selected: selected,
-      button: true,
-      label: label,
-      child: Material(
-        color: selected ? const Color(0xFFE5D5FF) : Colors.transparent,
-        borderRadius: BorderRadius.circular(23),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(23),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                color: selected ? playfulPurple : playfulInk,
-                size: 27,
-              ),
-              const SizedBox(height: 1),
-              Text(
-                label,
-                style: TextStyle(
-                  color: selected ? playfulPurple : playfulInk,
-                  fontSize: 13,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+    return RoomsScreen(
+      repository: widget.repository,
+      chatRepository: widget.chatRepository,
+      displayName: widget.displayName,
+      isGuest: widget.isGuest,
+      onSignOut: widget.onSignOut,
+      profileStorageScope: widget.localStorageScope,
     );
   }
 }

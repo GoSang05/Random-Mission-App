@@ -32,6 +32,7 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
+/dist/*.apk
 
 # Local Supabase project configuration. This file is intentionally not tracked.
 /supabase.env.json

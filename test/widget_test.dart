@@ -3,7 +3,23 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:random_mission_app/data/local_mission_repository.dart';
 import 'package:random_mission_app/main.dart';
 import 'package:random_mission_app/models/mission_data.dart';
+import 'package:random_mission_app/screens/room_detail_screen.dart';
 import 'package:random_mission_app/screens/rooms_screen.dart';
+
+class _LockedJoinRepository extends LocalMissionRepository {
+  final attempts = <String?>[];
+
+  @override
+  Future<JoinRoomResult> joinRoomPersisted(
+    String code, {
+    String? password,
+  }) async {
+    attempts.add(password);
+    return password == '4321'
+        ? JoinRoomResult.joined
+        : JoinRoomResult.wrongPassword;
+  }
+}
 
 Future<LocalMissionRepository> pumpMvp(WidgetTester tester) async {
   tester.view.physicalSize = const Size(390, 844);
@@ -126,6 +142,7 @@ void main() {
 
     expect(find.text('DOIT'), findsOneWidget);
     expect(find.text('My Rooms'), findsOneWidget);
+    expect(find.text('매거진'), findsNothing);
     expect(find.byKey(const Key('previewModeNotice')), findsNothing);
 
     await tester.tap(find.byKey(const Key('createRoomButton')));
@@ -145,7 +162,7 @@ void main() {
     );
   });
 
-  testWidgets('개인 방에서 스토리 투표와 채팅을 사용할 수 있다', (tester) async {
+  testWidgets('개인 방에서 스토리와 채팅을 사용할 수 있다', (tester) async {
     await pumpMvp(tester);
     await openRoom(tester, 'FRI824');
 
@@ -169,12 +186,81 @@ void main() {
     await pumpUi(tester);
 
     expect(find.text('1/1'), findsOneWidget);
-    expect(find.text('Accepted · 0'), findsOneWidget);
+    expect(find.byKey(const Key('thumbDownButton')), findsNothing);
+    expect(find.byKey(const Key('thumbUpButton')), findsNothing);
+    expect(find.text('투표를 기다리는 중'), findsNothing);
+  });
 
-    await tester.tap(find.byKey(const Key('thumbDownButton')));
+  testWidgets('코드 참여는 잠긴 방에서만 비밀번호를 추가로 묻는다', (tester) async {
+    final repository = _LockedJoinRepository();
+    await repository.initialize();
+    addTearDown(repository.dispose);
+    await tester.pumpWidget(
+      MaterialApp(home: RoomsScreen(repository: repository)),
+    );
     await pumpUi(tester);
-    expect(find.text('Accepted · 0'), findsOneWidget);
-    expect(find.text('Not Accepted · 1'), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('joinRoomButton')));
+    await pumpUi(tester);
+    expect(find.byKey(const Key('roomCodeField')), findsOneWidget);
+    expect(find.byKey(const Key('joinRoomPasswordField')), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('roomCodeField')), 'LOCKED');
+    await tester.tap(find.byKey(const Key('confirmJoinRoomButton')));
+    await pumpUi(tester);
+    expect(repository.attempts, [null]);
+    expect(find.byKey(const Key('joinRoomPasswordField')), findsOneWidget);
+
+    await tester.enterText(
+      find.byKey(const Key('joinRoomPasswordField')),
+      '4321',
+    );
+    await tester.tap(find.byKey(const Key('confirmJoinRoomPasswordButton')));
+    await pumpUi(tester);
+    expect(repository.attempts, [null, '4321']);
+  });
+
+  testWidgets('방 히스토리는 지난 사진을 날짜별로 묶는다', (tester) async {
+    var now = DateTime(2026, 8, 30, 12);
+    final repository = LocalMissionRepository(now: () => now);
+    await repository.initialize();
+    addTearDown(repository.dispose);
+    final room = repository.createRoom('날짜별 기록');
+    repository.addSubmission(
+      roomId: room.id,
+      missionId: room.missions.first.id,
+      localPath: '/test/august-30.jpg',
+      mediaKind: MissionMediaKind.photo,
+    );
+    now = DateTime(2026, 8, 31, 12);
+    repository.refreshDailyMissionsIfNeeded();
+    final nextRoom = repository.roomById(room.id)!;
+    repository.addSubmission(
+      roomId: room.id,
+      missionId: nextRoom.missions.first.id,
+      localPath: '/test/august-31.jpg',
+      mediaKind: MissionMediaKind.photo,
+    );
+    now = DateTime(2026, 9, 1, 12);
+    repository.refreshDailyMissionsIfNeeded();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: RoomDetailScreen(repository: repository, roomId: room.id),
+      ),
+    );
+    await pumpUi(tester);
+    await tester.tap(find.byKey(const Key('roomHistoryButton')));
+    await pumpUi(tester);
+
+    expect(find.byKey(const Key('roomHistoryDateList')), findsOneWidget);
+    expect(find.byKey(const Key('historyDate_2026_8_31')), findsOneWidget);
+    await tester.drag(
+      find.byKey(const Key('roomHistoryDateList')),
+      const Offset(0, -420),
+    );
+    await pumpUi(tester);
+    expect(find.byKey(const Key('historyDate_2026_8_30')), findsOneWidget);
   });
 
   testWidgets('방 설정은 초대 코드와 인원만 노출한다', (tester) async {

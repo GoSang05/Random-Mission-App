@@ -24,6 +24,7 @@ class _ConversationScreenState extends State<ConversationScreen> {
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
   var _isSending = false;
+  var _visibleMessageCount = -1;
 
   @override
   void dispose() {
@@ -105,14 +106,18 @@ class _ConversationScreenState extends State<ConversationScreen> {
                             child: CircularProgressIndicator(),
                           );
                         }
-                        final messages = snapshot.data!;
+                        final messages = [...snapshot.data!]
+                          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
                         if (messages.isEmpty) {
                           return const _ChatStatus(
                             icon: Icons.forum_outlined,
                             message: '첫 메시지를 보내보세요.',
                           );
                         }
-                        _scrollToEnd();
+                        if (_visibleMessageCount != messages.length) {
+                          _visibleMessageCount = messages.length;
+                          _scrollToEnd();
+                        }
                         return ListView.builder(
                           key: const Key('conversationMessages'),
                           controller: _scrollController,
@@ -120,6 +125,9 @@ class _ConversationScreenState extends State<ConversationScreen> {
                           itemCount: messages.length,
                           itemBuilder: (context, index) {
                             final message = messages[index];
+                            if (message.isSystem) {
+                              return _SystemMessage(message: message.text);
+                            }
                             return ChatMessageBubble(
                               message: message,
                               isMine:
@@ -144,6 +152,37 @@ class _ConversationScreenState extends State<ConversationScreen> {
                 ],
               ),
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SystemMessage extends StatelessWidget {
+  const _SystemMessage({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Container(
+        key: const Key('chatSystemMessage'),
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: const Color(0xFFE9DEFF),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: playfulInk, width: 2),
+        ),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: playfulInk,
+            fontSize: 13,
+            fontWeight: FontWeight.w800,
           ),
         ),
       ),

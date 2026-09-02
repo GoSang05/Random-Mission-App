@@ -20,7 +20,7 @@ class AuthScreen extends StatefulWidget {
   });
 
   final AuthService authService;
-  final VoidCallback? onGuest;
+  final ValueChanged<String>? onGuest;
 
   @override
   State<AuthScreen> createState() => _AuthScreenState();
@@ -29,22 +29,22 @@ class AuthScreen extends StatefulWidget {
 class _AuthScreenState extends State<AuthScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
-  final _emailController = TextEditingController();
+  final _loginIdController = TextEditingController();
+  final _guestNameController = TextEditingController(text: 'Guest');
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   var _isSignUp = false;
   var _isSubmitting = false;
   var _obscurePassword = true;
-  String? _pendingEmail;
-  String? _pendingPassword;
+  var _showGuestSetup = false;
 
   @override
   void dispose() {
     _nameController.dispose();
-    _emailController.dispose();
+    _loginIdController.dispose();
+    _guestNameController.dispose();
     _passwordController.dispose();
     _confirmPasswordController.dispose();
-    _pendingPassword = null;
     super.dispose();
   }
 
@@ -56,22 +56,16 @@ class _AuthScreenState extends State<AuthScreen> {
     if (!_formKey.currentState!.validate() || _isSubmitting) return;
     setState(() => _isSubmitting = true);
     try {
-      final email = _emailController.text.trim().toLowerCase();
+      final loginId = _loginIdController.text.trim().toLowerCase();
       final password = _passwordController.text;
       if (_isSignUp) {
-        final needsEmail = await widget.authService.signUp(
+        await widget.authService.signUp(
           displayName: _nameController.text.trim(),
-          email: email,
+          loginId: loginId,
           password: password,
         );
-        if (needsEmail && mounted) {
-          setState(() {
-            _pendingEmail = email;
-            _pendingPassword = password;
-          });
-        }
       } else {
-        await widget.authService.signIn(email: email, password: password);
+        await widget.authService.signIn(loginId: loginId, password: password);
       }
     } on TimeoutException {
       _showMessage('서버 응답이 늦어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
@@ -108,10 +102,12 @@ class _AuthScreenState extends State<AuthScreen> {
     final message = error.message.toLowerCase();
     final code = error.code?.toLowerCase() ?? '';
     if (message.contains('invalid login credentials')) {
-      return '이메일 또는 비밀번호가 올바르지 않아요.';
+      return 'ID 또는 비밀번호가 올바르지 않아요.';
     }
-    if (message.contains('already registered')) return '이미 가입된 이메일이에요.';
-    if (message.contains('email not confirmed')) return '이메일 인증을 먼저 완료해 주세요.';
+    if (message.contains('already registered')) return '이미 사용 중인 ID예요.';
+    if (message.contains('email not confirmed')) {
+      return '서버의 이메일 확인 설정을 꺼야 ID 로그인을 사용할 수 있어요.';
+    }
     if (code.contains('email_address_not_authorized') ||
         message.contains('email address not authorized')) {
       return '현재 메일 서버가 이 주소로 인증 메일을 보낼 수 없어요. 관리자에게 알려주세요.';
@@ -131,46 +127,8 @@ class _AuthScreenState extends State<AuthScreen> {
     return '계정을 확인하지 못했어요. 입력 내용을 다시 확인해 주세요.';
   }
 
-  Future<void> _resendConfirmation() async {
-    if (_isSubmitting || _pendingEmail == null) return;
-    setState(() => _isSubmitting = true);
-    try {
-      await widget.authService.resendSignupConfirmation(_pendingEmail!);
-      _showMessage('인증 이메일을 다시 보냈어요. 스팸함도 확인해 주세요.');
-    } on TimeoutException {
-      _showMessage('서버 응답이 늦어요. 인터넷 연결을 확인하고 다시 시도해 주세요.');
-    } on AuthException catch (error) {
-      _showMessage(_authMessage(error));
-    } catch (_) {
-      _showMessage('이메일을 보내지 못했어요. 인터넷 연결을 확인해 주세요.');
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
-    }
-  }
-
-  Future<void> _checkConfirmation() async {
-    if (_isSubmitting || _pendingEmail == null || _pendingPassword == null) {
-      return;
-    }
-    setState(() => _isSubmitting = true);
-    try {
-      await widget.authService.signIn(
-        email: _pendingEmail!,
-        password: _pendingPassword!,
-      );
-    } on AuthException catch (error) {
-      _showMessage(_authMessage(error));
-    } on TimeoutException {
-      _showMessage('서버 응답이 늦어요. 잠시 뒤 다시 시도해 주세요.');
-    } catch (_) {
-      _showMessage('인증 상태를 확인하지 못했어요. 다시 시도해 주세요.');
-    } finally {
-      if (mounted) setState(() => _isSubmitting = false);
-    }
-  }
-
-  bool _isValidEmail(String email) =>
-      RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
+  bool _isValidLoginId(String value) =>
+      RegExp(r'^[a-zA-Z0-9_]{4,20}$').hasMatch(value);
 
   void _switchMode() {
     _formKey.currentState?.reset();
@@ -179,14 +137,17 @@ class _AuthScreenState extends State<AuthScreen> {
     setState(() => _isSignUp = !_isSignUp);
   }
 
-  void _leaveConfirmation() {
-    _pendingPassword = null;
-    _passwordController.clear();
-    _confirmPasswordController.clear();
-    setState(() {
-      _pendingEmail = null;
-      _isSignUp = false;
-    });
+  void _openGuestSetup() {
+    setState(() => _showGuestSetup = true);
+  }
+
+  void _enterGuest() {
+    final name = _guestNameController.text.trim();
+    if (name.isEmpty) {
+      _showMessage('Guest 닉네임을 입력해 주세요.');
+      return;
+    }
+    widget.onGuest?.call(name);
   }
 
   @override
@@ -230,9 +191,9 @@ class _AuthScreenState extends State<AuthScreen> {
                     padding: const EdgeInsets.fromLTRB(26, 30, 26, 38),
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 520),
-                      child: _pendingEmail == null
-                          ? _buildAuthForm()
-                          : _buildConfirmationWaiting(),
+                      child: _showGuestSetup
+                          ? _buildGuestSetup()
+                          : _buildAuthForm(),
                     ),
                   ),
                 ),
@@ -278,14 +239,14 @@ class _AuthScreenState extends State<AuthScreen> {
             const SizedBox(height: 15),
           ],
           _PlayfulAuthField(
-            fieldKey: const Key('authEmailField'),
-            controller: _emailController,
-            label: '이메일',
-            icon: Icons.mail_outline_rounded,
-            keyboardType: TextInputType.emailAddress,
+            fieldKey: const Key('authLoginIdField'),
+            controller: _loginIdController,
+            label: 'ID (영문, 숫자, _)',
+            icon: Icons.badge_outlined,
             textInputAction: TextInputAction.next,
-            validator: (value) =>
-                _isValidEmail(value?.trim() ?? '') ? null : '올바른 이메일을 입력해 주세요.',
+            validator: (value) => _isValidLoginId(value?.trim() ?? '')
+                ? null
+                : 'ID는 영문, 숫자, _ 조합 4~20자로 입력해 주세요.',
           ),
           const SizedBox(height: 15),
           _PlayfulAuthField(
@@ -348,7 +309,7 @@ class _AuthScreenState extends State<AuthScreen> {
               buttonKey: const Key('guestModeButton'),
               icon: Icons.person_outline_rounded,
               label: '로그인 없이 둘러보기',
-              onPressed: _isSubmitting ? null : widget.onGuest,
+              onPressed: _isSubmitting ? null : _openGuestSetup,
             ),
           ],
           const SizedBox(height: 20),
@@ -361,12 +322,12 @@ class _AuthScreenState extends State<AuthScreen> {
     );
   }
 
-  Widget _buildConfirmationWaiting() {
+  Widget _buildGuestSetup() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const Center(child: DoitLogo(fontSize: 66)),
-        const SizedBox(height: 28),
+        const SizedBox(height: 18),
         PlayfulPanel(
           color: Colors.white,
           radius: 30,
@@ -382,14 +343,14 @@ class _AuthScreenState extends State<AuthScreen> {
                   border: Border.all(color: playfulInk, width: 3),
                 ),
                 child: const Icon(
-                  Icons.mark_email_unread_rounded,
+                  Icons.person_outline_rounded,
                   size: 40,
                   color: playfulPurple,
                 ),
               ),
               const SizedBox(height: 20),
               const Text(
-                '인증 메일을 확인해 주세요',
+                'Guest로 시작하기',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   color: playfulInk,
@@ -398,43 +359,36 @@ class _AuthScreenState extends State<AuthScreen> {
                   letterSpacing: -1,
                 ),
               ),
-              const SizedBox(height: 10),
-              Text(
-                _pendingEmail!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: playfulPurple,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 8),
               const Text(
-                '메일 안의 인증 링크를 누른 뒤\n아래 버튼으로 완료 여부를 확인해 주세요.',
+                'Guest 데이터는 이 기기에만 저장돼요.\n나중에 프로필에서 닉네임을 바꿀 수 있어요.',
                 textAlign: TextAlign.center,
                 style: TextStyle(height: 1.5, color: Color(0xFF5D5865)),
+              ),
+              const SizedBox(height: 20),
+              _PlayfulAuthField(
+                fieldKey: const Key('guestDisplayNameField'),
+                controller: _guestNameController,
+                label: 'Guest 닉네임',
+                icon: Icons.edit_rounded,
+                maxLength: 40,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) => _enterGuest(),
               ),
             ],
           ),
         ),
         const SizedBox(height: 24),
         _PlayfulActionButton(
-          buttonKey: const Key('authCheckConfirmationButton'),
-          label: '인증 완료했어요',
-          busy: _isSubmitting,
-          onPressed: _checkConfirmation,
-        ),
-        const SizedBox(height: 12),
-        _OutlinedPlayfulButton(
-          buttonKey: const Key('authResendConfirmationButton'),
-          icon: Icons.refresh_rounded,
-          label: '인증 메일 다시 받기',
-          onPressed: _isSubmitting ? null : _resendConfirmation,
+          buttonKey: const Key('guestStartButton'),
+          label: 'Guest로 시작',
+          busy: false,
+          onPressed: _enterGuest,
         ),
         const SizedBox(height: 14),
         TextButton(
-          key: const Key('authBackToLoginButton'),
-          onPressed: _isSubmitting ? null : _leaveConfirmation,
-          child: const Text('다른 계정으로 로그인'),
+          key: const Key('guestBackToLoginButton'),
+          onPressed: () => setState(() => _showGuestSetup = false),
+          child: const Text('로그인으로 돌아가기'),
         ),
       ],
     );
@@ -447,7 +401,6 @@ class _PlayfulAuthField extends StatelessWidget {
     required this.controller,
     required this.label,
     required this.icon,
-    this.keyboardType,
     this.textInputAction,
     this.obscureText = false,
     this.suffixIcon,
@@ -460,7 +413,6 @@ class _PlayfulAuthField extends StatelessWidget {
   final TextEditingController controller;
   final String label;
   final IconData icon;
-  final TextInputType? keyboardType;
   final TextInputAction? textInputAction;
   final bool obscureText;
   final Widget? suffixIcon;
@@ -482,7 +434,6 @@ class _PlayfulAuthField extends StatelessWidget {
       child: TextFormField(
         key: fieldKey,
         controller: controller,
-        keyboardType: keyboardType,
         textInputAction: textInputAction,
         obscureText: obscureText,
         maxLength: maxLength,

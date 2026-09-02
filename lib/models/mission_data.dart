@@ -43,6 +43,7 @@ class MissionRoom {
   bool get isLocked => password != null && password!.isNotEmpty;
 
   MissionRoom copyWith({
+    String? name,
     bool? isJoined,
     int? memberCount,
     List<Mission>? missions,
@@ -50,13 +51,36 @@ class MissionRoom {
   }) {
     return MissionRoom(
       id: id,
-      name: name,
+      name: name ?? this.name,
       kind: kind,
       code: code,
       password: password ?? this.password,
       isJoined: isJoined ?? this.isJoined,
       memberCount: memberCount ?? this.memberCount,
       missions: missions ?? this.missions,
+    );
+  }
+}
+
+class MissionRoomMember {
+  const MissionRoomMember({
+    required this.userId,
+    required this.displayName,
+    required this.joinedAt,
+    required this.isOwner,
+  });
+
+  final String userId;
+  final String displayName;
+  final DateTime joinedAt;
+  final bool isOwner;
+
+  factory MissionRoomMember.fromJson(Map<String, dynamic> json) {
+    return MissionRoomMember(
+      userId: json['user_id'] as String,
+      displayName: json['display_name'] as String,
+      joinedAt: DateTime.parse(json['joined_at'] as String).toLocal(),
+      isOwner: json['is_owner'] as bool? ?? false,
     );
   }
 }

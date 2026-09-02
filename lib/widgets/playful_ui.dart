@@ -23,6 +23,7 @@ class PlayfulHeader extends StatelessWidget {
     this.actions = const [],
     this.dark = false,
     this.titleWidget,
+    this.bareBackButton = false,
     super.key,
   });
 
@@ -30,6 +31,7 @@ class PlayfulHeader extends StatelessWidget {
   final List<Widget> actions;
   final bool dark;
   final Widget? titleWidget;
+  final bool bareBackButton;
 
   @override
   Widget build(BuildContext context) {
@@ -42,22 +44,32 @@ class PlayfulHeader extends StatelessWidget {
         children: [
           Row(
             children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: dark ? playfulCream : Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: playfulInk, width: 3),
-                  boxShadow: const [
-                    BoxShadow(color: playfulInk, offset: Offset(0, 5)),
-                  ],
+              if (bareBackButton)
+                SizedBox(
+                  width: 52,
+                  height: 52,
+                  child: BackButton(
+                    color: foreground,
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                )
+              else
+                Container(
+                  width: 52,
+                  height: 52,
+                  decoration: BoxDecoration(
+                    color: dark ? playfulCream : Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: playfulInk, width: 3),
+                    boxShadow: const [
+                      BoxShadow(color: playfulInk, offset: Offset(0, 5)),
+                    ],
+                  ),
+                  child: BackButton(
+                    color: playfulInk,
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
                 ),
-                child: BackButton(
-                  color: playfulInk,
-                  onPressed: () => Navigator.of(context).maybePop(),
-                ),
-              ),
               const Spacer(),
               ...actions.expand((item) => [const SizedBox(width: 9), item]),
             ],
@@ -106,6 +118,7 @@ class PlayfulIconButton extends StatelessWidget {
     this.fill,
     this.iconColor,
     this.size = 52,
+    this.bare = false,
     super.key,
   });
 
@@ -117,11 +130,26 @@ class PlayfulIconButton extends StatelessWidget {
   final Color? fill;
   final Color? iconColor;
   final double size;
+  final bool bare;
 
   @override
   Widget build(BuildContext context) {
     final background = fill ?? (dark ? playfulCream : Colors.white);
     final foreground = iconColor ?? playfulInk;
+    if (bare) {
+      final button = SizedBox(
+        width: size,
+        height: size,
+        child: IconButton(
+          key: buttonKey,
+          onPressed: onPressed,
+          icon: Icon(icon, color: foreground, size: size * .58),
+        ),
+      );
+      return tooltip == null
+          ? button
+          : Tooltip(message: tooltip!, child: button);
+    }
     final button = Container(
       width: size,
       height: size,

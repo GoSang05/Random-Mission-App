@@ -114,4 +114,26 @@ void main() {
       throwsArgumentError,
     );
   });
+
+  test('참여한 private room에서 나가면 목록에서 사라진다', () async {
+    final repository = LocalMissionRepository(
+      previewUserName: '별이',
+      includePreviewData: false,
+    );
+    await repository.initialize();
+    addTearDown(repository.dispose);
+    final room = repository.createRoom('나갈 방');
+
+    await repository.renameRoomPersisted(room.id, '바뀐 방');
+    final members = await repository.listRoomMembers(room.id);
+
+    expect(repository.roomById(room.id)!.name, '바뀐 방');
+    expect(members.single.displayName, '별이');
+    expect(members.single.isOwner, isTrue);
+
+    await repository.leaveRoomPersisted(room.id);
+
+    expect(repository.roomById(room.id), isNull);
+    expect(repository.joinedRooms, isEmpty);
+  });
 }

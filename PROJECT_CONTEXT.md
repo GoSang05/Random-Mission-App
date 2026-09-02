@@ -6,28 +6,43 @@
   (`vzlzrpghnrmncwvfhdil`). All repository migrations were deployed there on
   2026-08-31, and the local ignored `supabase.env.json` points to this project.
 * Signed-in users use Supabase for Auth, private/global rooms, memberships,
-  server-selected daily missions, photo submissions, votes, profiles, and
+  server-selected daily missions, photo submissions, profiles, and
   realtime chat.
 * Mission photos and profile avatars are stored in private Supabase Storage
   buckets and protected by authenticated RLS policies.
-* The app contains no bundled preview rooms, preview submissions, seed votes,
-  or seed messages. Widget tests create their own isolated fixtures.
+* The app contains no bundled preview rooms, preview submissions, or seed
+  messages. Widget tests create their own isolated fixtures.
+* Story approval/rejection voting was removed from the UI on 2026-09-01. The
+  legacy vote table and client compatibility fields remain temporarily so old
+  builds and existing remote rows are not broken or destructively deleted.
 * Guest mode is a local-only development path and starts with empty private
   data. Its storage key was advanced to avoid restoring the former preview
   snapshot.
 * New clones must create their own ignored `supabase.env.json`. Reusing this
   backend requires a publishable key from the project owner; using a different
-  project also requires applying both repository migrations there.
+  project also requires applying all repository migrations there.
 * Existing remote room chats are migrated into mission rooms without deleting
   their messages or memberships. Legacy room passwords did not exist on the
   server and therefore cannot be recovered.
-* Email/password signup requires email confirmation. After signup the app shows
-  a dedicated waiting screen with resend and confirmation-check actions.
-* The project currently uses Supabase's default mailer, so confirmation mail is
-  restricted to organization-member addresses until custom SMTP is configured.
-* Native Google account selection is implemented in Flutter, but production
-  activation still requires stable Android/iOS app identifiers plus Google
-  OAuth client IDs and enabling the Google provider in Supabase.
+* The user-facing password flow uses a 4-20 character login ID plus password.
+  Supabase only natively accepts email/phone password identities, so the app
+  maps that ID to an internal auth address. Confirm email is disabled and this
+  flow does not collect an email address. Password recovery still needs a
+  separate method before production launch.
+* Native Google account selection is active. Google Cloud project
+  `noted-aloe-441912-d6` has Web, Android, and iOS OAuth clients; the Supabase
+  Google provider is enabled with the Web secret stored only in Supabase.
+  Android uses package `com.gosang05.doit` and the configured debug SHA-1;
+  iOS uses bundle ID `com.gosang05.doit` and its reversed-client URL scheme.
+* The Google OAuth app is currently in Testing status. Only Google accounts
+  added as test users can sign in until public app links and branding are
+  completed and the OAuth app is published. `leejonghan5091@gmail.com` is the
+  first registered test user.
+* The login screen has a dedicated Guest nickname step. Guest data remains
+  device-local and is not shared between Android and iOS devices.
+* Private-room settings support leaving, owner-only room renaming, and a member
+  list. Leaving removes mission/chat membership and records a system message
+  for the remaining chat members.
 * Profile display-name changes update existing chat message display names on
   the server. Mission submission names are joined from the current profile and
   refresh through Realtime profile changes.
@@ -365,7 +380,7 @@ TODAY'S GLOBAL MISSION
 5,000원으로 가장 이상한 물건 사기
 ```
 
-같은 미션을 전체 사용자에게 제공하고 투표 기능을 붙이는 것도 가능하다.
+같은 미션을 전체 사용자에게 제공하고 서로의 결과를 둘러볼 수 있다.
 
 ---
 
@@ -1241,4 +1256,8 @@ Android Emulator not running
 * 스타일 변경 시 채팅, 히스토리, 설정, 촬영, 스토리 진입과 기존 테스트 키를 유지한다.
 * Global Mission Room에는 "모든 사용자에게 같은 미션" 안내 배너를 표시하지 않는다.
 * 개인 방 히스토리·방 설정·홈 프로필 설정·닉네임 편집 팝업도 playful outlined 테마를 사용한다.
-* 매거진 화면은 별도 요청이 없는 한 이 디자인 변경 범위에 포함하지 않는다.
+* 앱은 랜덤 미션 방에 집중하며 매거진 화면과 매거진 로컬 저장소는 제거한다.
+* 코드 참여는 초대 코드를 먼저 확인하고, 잠긴 방일 때만 두 번째 단계에서 비밀번호를 요청한다.
+* 개인 방 히스토리는 지난 사진을 날짜별로 묶어 최신 날짜부터 표시한다.
+* 채팅은 오래된 메시지가 위, 새로운 메시지가 아래에 오도록 표시한다.
+* 개인 방 헤더의 나가기·채팅·히스토리·설정 동작은 배경 카드 없이 아이콘으로 표시한다.

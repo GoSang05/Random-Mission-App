@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../data/local_mission_repository.dart';
 import '../models/mission_data.dart';
-import '../utils/app_snackbar.dart';
 import '../widgets/mission_photo.dart';
 import '../widgets/playful_illustrations.dart';
 import '../widgets/playful_ui.dart';
@@ -55,20 +54,6 @@ class _MissionFeedScreenState extends State<MissionFeedScreen> {
   void dispose() {
     _pageController.dispose();
     super.dispose();
-  }
-
-  Future<void> _vote(MissionSubmission submission, VoteChoice choice) async {
-    try {
-      final changed = await widget.repository.castVotePersisted(
-        submission.id,
-        choice,
-      );
-      if (!changed && mounted) {
-        showAppSnackBar(context, '이미 같은 선택으로 투표했어요.');
-      }
-    } on MissionRepositoryException catch (error) {
-      if (mounted) showAppSnackBar(context, error.message);
-    }
   }
 
   void _goToPage(int index, int total) {
@@ -135,7 +120,6 @@ class _MissionFeedScreenState extends State<MissionFeedScreen> {
                   onNext: index == submissions.length - 1
                       ? null
                       : () => _goToPage(index + 1, submissions.length),
-                  onVote: (choice) => _vote(submission, choice),
                 );
               },
             ),
@@ -156,7 +140,6 @@ class _StoryPage extends StatefulWidget {
     required this.onBack,
     required this.onPrevious,
     required this.onNext,
-    required this.onVote,
   });
 
   final String roomName;
@@ -167,7 +150,6 @@ class _StoryPage extends StatefulWidget {
   final VoidCallback onBack;
   final VoidCallback? onPrevious;
   final VoidCallback? onNext;
-  final ValueChanged<VoteChoice> onVote;
 
   @override
   State<_StoryPage> createState() => _StoryPageState();
@@ -195,20 +177,6 @@ class _StoryPageState extends State<_StoryPage> {
   @override
   Widget build(BuildContext context) {
     final submission = widget.submission;
-    final accepted = submission.acceptedVotes;
-    final rejected = submission.notAcceptedVotes;
-    final hasVotes = accepted + rejected > 0;
-    final approved = hasVotes && accepted > rejected;
-    final statusColor = !hasVotes
-        ? const Color(0xFFE7D7FF)
-        : approved
-        ? const Color(0xFFBDEB9E)
-        : const Color(0xFFFFC3C1);
-    final statusText = !hasVotes
-        ? '투표를 기다리는 중'
-        : approved
-        ? '현재 승인됨'
-        : '현재 미승인';
 
     return SafeArea(
       child: Padding(
@@ -374,28 +342,6 @@ class _StoryPageState extends State<_StoryPage> {
                                       ],
                                     ),
                                   ),
-                                  const SizedBox(height: 9),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: 14,
-                                      vertical: 7,
-                                    ),
-                                    decoration: BoxDecoration(
-                                      color: statusColor,
-                                      borderRadius: BorderRadius.circular(99),
-                                      border: Border.all(
-                                        color: playfulInk,
-                                        width: 2,
-                                      ),
-                                    ),
-                                    child: Text(
-                                      statusText,
-                                      style: const TextStyle(
-                                        color: playfulInk,
-                                        fontWeight: FontWeight.w900,
-                                      ),
-                                    ),
-                                  ),
                                 ],
                               ),
                             ),
@@ -407,104 +353,7 @@ class _StoryPageState extends State<_StoryPage> {
                 },
               ),
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: [
-                Expanded(
-                  child: _VoteButton(
-                    buttonKey: const Key('thumbDownButton'),
-                    icon: Icons.thumb_down_alt_rounded,
-                    label: 'Not Accepted',
-                    count: rejected,
-                    color: const Color(0xFFFF7975),
-                    selected:
-                        submission.currentUserVote == VoteChoice.notAccepted,
-                    onTap: () => widget.onVote(VoteChoice.notAccepted),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: _VoteButton(
-                    buttonKey: const Key('thumbUpButton'),
-                    icon: Icons.thumb_up_alt_rounded,
-                    label: 'Accepted',
-                    count: accepted,
-                    color: const Color(0xFF82D35F),
-                    selected: submission.currentUserVote == VoteChoice.accepted,
-                    onTap: () => widget.onVote(VoteChoice.accepted),
-                  ),
-                ),
-              ],
-            ),
           ],
-        ),
-      ),
-    );
-  }
-}
-
-class _VoteButton extends StatelessWidget {
-  const _VoteButton({
-    required this.buttonKey,
-    required this.icon,
-    required this.label,
-    required this.count,
-    required this.color,
-    required this.selected,
-    required this.onTap,
-  });
-
-  final Key buttonKey;
-  final IconData icon;
-  final String label;
-  final int count;
-  final Color color;
-  final bool selected;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    return Semantics(
-      button: true,
-      selected: selected,
-      label: '$label, $count표',
-      child: Container(
-        height: 68,
-        decoration: BoxDecoration(
-          color: selected ? color : color.withValues(alpha: .82),
-          borderRadius: BorderRadius.circular(23),
-          border: Border.all(color: playfulInk, width: 3),
-          boxShadow: const [BoxShadow(color: playfulInk, offset: Offset(0, 6))],
-        ),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            key: buttonKey,
-            onTap: onTap,
-            borderRadius: BorderRadius.circular(20),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(icon, color: Colors.white, size: 27),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    '$label · $count',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w900,
-                      shadows: [
-                        Shadow(color: Colors.black38, offset: Offset(1, 2)),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
         ),
       ),
     );

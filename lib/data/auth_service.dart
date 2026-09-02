@@ -15,17 +15,15 @@ class AuthConfigurationException implements Exception {
 }
 
 abstract interface class AuthService {
-  Future<bool> signUp({
+  Future<void> signUp({
     required String displayName,
-    required String email,
+    required String loginId,
     required String password,
   });
 
-  Future<void> signIn({required String email, required String password});
+  Future<void> signIn({required String loginId, required String password});
 
   Future<void> signInWithGoogle();
-
-  Future<void> resendSignupConfirmation(String email);
 }
 
 class SupabaseAuthService implements AuthService {
@@ -38,30 +36,48 @@ class SupabaseAuthService implements AuthService {
   static const _googleIosClientId = String.fromEnvironment(
     'GOOGLE_IOS_CLIENT_ID',
   );
+  static const _googleScopes = <String>[
+    'https://www.googleapis.com/auth/userinfo.email',
+    'https://www.googleapis.com/auth/userinfo.profile',
+  ];
 
   final SupabaseClient _client;
 
   @override
-  Future<bool> signUp({
+  Future<void> signUp({
     required String displayName,
-    required String email,
+    required String loginId,
     required String password,
   }) async {
-    final response = await _client.auth
+    await _client.auth
         .signUp(
-          email: email,
+          email: _authEmail(loginId),
           password: password,
-          data: {'display_name': displayName},
+          data: {
+            'display_name': displayName,
+            'login_id': loginId.trim().toLowerCase(),
+          },
         )
         .timeout(_requestTimeout);
-    return response.session == null;
   }
 
   @override
-  Future<void> signIn({required String email, required String password}) async {
+  Future<void> signIn({
+    required String loginId,
+    required String password,
+  }) async {
     await _client.auth
-        .signInWithPassword(email: email, password: password)
+        .signInWithPassword(email: _authEmail(loginId), password: password)
         .timeout(_requestTimeout);
+  }
+
+  /// Supabase password auth requires an email or phone identifier. The app
+  /// exposes a username-like ID and maps it deterministically to an internal
+  /// address. Addresses entered by existing users remain valid for migration.
+  static String _authEmail(String loginId) {
+    final normalized = loginId.trim().toLowerCase();
+    if (normalized.contains('@')) return normalized;
+    return '$normalized@id.doitapp.app';
   }
 
   @override
@@ -90,9 +106,12 @@ class SupabaseAuthService implements AuthService {
             : null,
         serverClientId: _googleWebClientId,
       );
-      final account = await signIn.authenticate();
-      final authorization = await account.authorizationClient
-          .authorizationForScopes(const []);
+      final account = await signIn.authenticate(scopeHint: _googleScopes);
+      final authorization =
+          await account.authorizationClient.authorizationForScopes(
+            _googleScopes,
+          ) ??
+          await account.authorizationClient.authorizeScopes(_googleScopes);
       final idToken = account.authentication.idToken;
       if (idToken == null || idToken.isEmpty) {
         throw const AuthConfigurationException('Google에서 로그인 토큰을 받지 못했어요.');
@@ -101,21 +120,30 @@ class SupabaseAuthService implements AuthService {
           .signInWithIdToken(
             provider: OAuthProvider.google,
             idToken: idToken,
-            accessToken: authorization?.accessToken,
+            accessToken: authorization.accessToken,
           )
           .timeout(_requestTimeout);
     } on GoogleSignInException catch (error) {
+      debugPrint(
+        'Google sign-in failed: ${error.code.name}; ${error.description ?? 'no description'}',
+      );
       if (error.code == GoogleSignInExceptionCode.canceled) {
         throw const AuthActionCancelled();
       }
-      throw const AuthConfigurationException('Google 로그인 설정을 확인해 주세요.');
+      final message = switch (error.code) {
+        GoogleSignInExceptionCode.clientConfigurationError =>
+          'Google 앱 설정이 현재 설치된 앱과 맞지 않아요. 앱을 최신 빌드로 다시 설치해 주세요.',
+        GoogleSignInExceptionCode.providerConfigurationError =>
+          '기기의 Google Play 서비스에서 로그인을 사용할 수 없어요. Play 서비스를 업데이트한 뒤 다시 시도해 주세요.',
+        GoogleSignInExceptionCode.uiUnavailable =>
+          'Google 계정 선택 화면을 열지 못했어요. 앱을 다시 연 뒤 시도해 주세요.',
+        GoogleSignInExceptionCode.interrupted =>
+          'Google 로그인이 중단됐어요. 잠시 후 다시 시도해 주세요.',
+        GoogleSignInExceptionCode.userMismatch =>
+          '선택한 Google 계정이 현재 로그인 계정과 달라요. 다시 선택해 주세요.',
+        _ => 'Google 로그인에 실패했어요. 오류 코드: ${error.code.name}',
+      };
+      throw AuthConfigurationException(message);
     }
-  }
-
-  @override
-  Future<void> resendSignupConfirmation(String email) async {
-    await _client.auth
-        .resend(type: OtpType.signup, email: email)
-        .timeout(_requestTimeout);
   }
 }

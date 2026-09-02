@@ -25,6 +25,7 @@ class LocalRoomChatScreen extends StatefulWidget {
 class _LocalRoomChatScreenState extends State<LocalRoomChatScreen> {
   final _controller = TextEditingController();
   final _scrollController = ScrollController();
+  var _visibleMessageCount = -1;
 
   @override
   void dispose() {
@@ -59,7 +60,14 @@ class _LocalRoomChatScreenState extends State<LocalRoomChatScreen> {
     return AnimatedBuilder(
       animation: widget.repository,
       builder: (context, _) {
-        final messages = widget.repository.messagesForRoom(widget.roomId);
+        final messages = [...widget.repository.messagesForRoom(widget.roomId)]
+          ..sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        if (_visibleMessageCount != messages.length) {
+          _visibleMessageCount = messages.length;
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _scrollToBottom();
+          });
+        }
         return Scaffold(
           backgroundColor: playfulCream,
           body: SafeArea(

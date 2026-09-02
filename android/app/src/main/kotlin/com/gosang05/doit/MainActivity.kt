@@ -1,4 +1,4 @@
-package com.example.random_mission_app
+package com.gosang05.doit
 
 import io.flutter.embedding.android.FlutterActivity
 
