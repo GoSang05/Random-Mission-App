@@ -3,6 +3,30 @@ import 'package:random_mission_app/data/local_mission_repository.dart';
 import 'package:random_mission_app/models/mission_data.dart';
 
 void main() {
+  test('rooms receive six distinct daily missions', () async {
+    var now = DateTime.utc(2026, 9, 4, 3);
+    final repository = LocalMissionRepository(
+      includePreviewData: false,
+      now: () => now,
+    );
+    addTearDown(repository.dispose);
+    await repository.initialize();
+    final privateRoom = repository.createRoom('Six missions');
+
+    for (var day = 0; day < 2; day++) {
+      for (final room in [
+        repository.globalRoom!,
+        repository.roomById(privateRoom.id)!,
+      ]) {
+        expect(room.missions, hasLength(6));
+        expect(room.missions.map((mission) => mission.id).toSet(), hasLength(6));
+        expect(room.missions.map((mission) => mission.title).toSet(), hasLength(6));
+      }
+      now = now.add(const Duration(days: 1));
+      repository.refreshDailyMissionsIfNeeded();
+    }
+  });
+
   test(
     'local repository keeps votes consistent without bundled dummy data',
     () async {

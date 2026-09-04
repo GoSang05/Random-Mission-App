@@ -15,4 +15,4 @@ const missionPool = <String>[
   '같은 장소에서 서로 다른 구도로 찍기',
 ];
 
-const dailyMissionCount = 3;
+const dailyMissionCount = 6;
